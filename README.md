@@ -1,4 +1,4 @@
-# Vidora
+# Vidora [beta]
 
 A clean, modern, mobile-responsive front end for browsing movies & series and
 playing them through the Vidking embed player you provided.

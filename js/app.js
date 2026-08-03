@@ -1,0 +1,939 @@
+/**
+ * VIDORA — APP
+ * Tiny History-API router + render functions. No build step, no framework.
+ * URLs are now clean (/movie/123, /watch/series/1/2/3, …) instead of
+ * hash-based (#/movie/123). vercel.json rewrites every non-/api path to
+ * index.html so a hard refresh or shared link on any of these routes
+ * still works — this file then reads location.pathname and renders.
+ */
+
+const app = document.getElementById("app");
+
+// ---------------- global redirect guard + internal link routing ----------------
+(() => {
+  function isBlockableUrl(url) {
+    try {
+      const u = new URL(url, location.href);
+      if (u.protocol === 'mailto:' || u.protocol === 'tel:') return false;
+      return u.origin !== location.origin;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest && e.target.closest('a');
+    if (!a || !a.href) return;
+
+    if (isBlockableUrl(a.href)) {
+      e.preventDefault();
+      console.warn('Blocked external navigation to', a.href);
+      try { if (window.VD && VD.toast) VD.toast('Blocked external redirect'); } catch (e) {}
+      return;
+    }
+
+    // Same-origin link: route it client-side instead of a full page reload,
+    // unless the person is trying to open it in a new tab/window or it's a
+    // download link — those should behave like a normal <a>.
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (a.target && a.target !== '' && a.target !== '_self') return;
+    if (a.hasAttribute('download')) return;
+    let u;
+    try { u = new URL(a.href, location.href); } catch { return; }
+    if (u.origin !== location.origin) return;
+    e.preventDefault();
+    navigate(u.pathname + u.search);
+  }, true);
+
+  document.addEventListener('submit', (e) => {
+    const form = e.target;
+    const action = form.getAttribute && form.getAttribute('action') || location.href;
+    if (isBlockableUrl(action)) {
+      e.preventDefault();
+      console.warn('Blocked external form submit to', action);
+      try { if (window.VD && VD.toast) VD.toast('Blocked external redirect'); } catch (e) {}
+    }
+  }, true);
+
+  const origOpen = window.open.bind(window);
+  window.open = function(url, name, specs) {
+    if (url && isBlockableUrl(url)) {
+      console.warn('Blocked window.open to', url);
+      try { if (window.VD && VD.toast) VD.toast('Blocked external popup'); } catch (e) {}
+      return null;
+    }
+    return origOpen(url, name, specs);
+  };
+
+  try {
+    const loc = window.location;
+    const origAssign = loc.assign.bind(loc);
+    const origReplace = loc.replace.bind(loc);
+    loc.assign = function(url) {
+      if (isBlockableUrl(url)) { console.warn('Blocked location.assign to', url); return; }
+      return origAssign(url);
+    };
+    loc.replace = function(url) {
+      if (isBlockableUrl(url)) { console.warn('Blocked location.replace to', url); return; }
+      return origReplace(url);
+    };
+  } catch (err) {
+    console.warn('Could not override location.assign/replace', err);
+  }
+
+  const mo = new MutationObserver((records) => {
+    for (const r of records) {
+      for (const n of r.addedNodes || []) {
+        if (n && n.querySelectorAll) {
+          const anchors = n.querySelectorAll('a[href]');
+          anchors.forEach((a) => a.addEventListener('click', (e) => {
+            if (isBlockableUrl(a.href)) { e.preventDefault(); console.warn('Blocked external navigation to', a.href); }
+          }));
+        }
+      }
+    }
+  });
+  mo.observe(document.documentElement || document.body, { childList: true, subtree: true });
+})();
+
+// ---------------- client-side navigation (History API) ----------------
+// `function` declarations are hoisted, so the click handler installed
+// above (which runs before this point textually) can still call these —
+// by the time a click actually happens, they're fully defined.
+let internalNavCount = 0;
+function navigate(path) {
+  if (location.pathname + location.search === path) { route(); return; }
+  history.pushState({}, "", path);
+  internalNavCount++;
+  route();
+}
+// Exposed so party-ui.js (a separate module) can navigate without a hash.
+window.vidoraNavigate = navigate;
+
+function goBack(fallbackPath) {
+  // If we got here via our own client-side navigation this session, a real
+  // browser "back" takes you somewhere sensible inside the app. If this
+  // page was opened fresh (e.g. a shared link), fall back to a known route
+  // instead of risking a jump off-site to whatever referred here.
+  if (internalNavCount > 0) history.back();
+  else navigate(fallbackPath);
+}
+
+window.addEventListener("popstate", () => route());
+
+// ---------------- shared bits ----------------
+
+function escAttr(str) {
+  return String(str ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+}
+
+// ---------------- My List (favorites) ----------------
+const VD_LIST_KEY = "vidora_my_list";
+
+function readMyList() {
+  try { return JSON.parse(localStorage.getItem(VD_LIST_KEY)) || {}; } catch { return {}; }
+}
+function writeMyList(list) {
+  localStorage.setItem(VD_LIST_KEY, JSON.stringify(list));
+}
+function myListKey(mediaType, id) {
+  return `${mediaType}-${id}`;
+}
+function isInMyList(mediaType, id) {
+  return !!readMyList()[myListKey(mediaType, id)];
+}
+function getMyList() {
+  return Object.values(readMyList()).sort((a, b) => b.addedAt - a.addedAt);
+}
+function toggleMyList(item) {
+  const list = readMyList();
+  const key = myListKey(item.mediaType, item.id);
+  if (list[key]) {
+    delete list[key];
+  } else {
+    list[key] = {
+      id: item.id, mediaType: item.mediaType, title: item.title, poster: item.poster,
+      year: item.year, rating: item.rating, genres: item.genres, addedAt: Date.now(),
+    };
+  }
+  writeMyList(list);
+  return !!list[key];
+}
+
+function favButtonHTML(item, { compact = false } = {}) {
+  const fav = isInMyList(item.mediaType, item.id);
+  const dataItem = escAttr(JSON.stringify({
+    id: item.id, mediaType: item.mediaType, title: item.title, poster: item.poster,
+    year: item.year, rating: item.rating, genres: item.genres,
+  }));
+  if (compact) {
+    return `<button type="button" class="card-fav-btn${fav ? " active" : ""}" data-item="${dataItem}" aria-pressed="${fav}" aria-label="${fav ? "Remove from My List" : "Add to My List"}">${VD.icon(fav ? "heartFilled" : "heart", { size: 16 })}</button>`;
+  }
+  return `<button type="button" class="btn btn-ghost fav-btn${fav ? " active" : ""}" data-item="${dataItem}" aria-pressed="${fav}">${VD.icon(fav ? "heartFilled" : "heart", { size: 16 })} ${fav ? "In My List" : "Add to My List"}</button>`;
+}
+
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest(".card-fav-btn, .fav-btn");
+  if (!btn) return;
+  e.preventDefault();
+  let item;
+  try { item = JSON.parse(btn.dataset.item); } catch { return; }
+  const nowFav = toggleMyList(item);
+  document.querySelectorAll(".card-fav-btn[data-item], .fav-btn[data-item]").forEach((b) => {
+    let bi;
+    try { bi = JSON.parse(b.dataset.item); } catch { return; }
+    if (String(bi.id) !== String(item.id) || bi.mediaType !== item.mediaType) return;
+    b.classList.toggle("active", nowFav);
+    b.setAttribute("aria-pressed", String(nowFav));
+    if (b.classList.contains("card-fav-btn")) {
+      b.innerHTML = VD.icon(nowFav ? "heartFilled" : "heart", { size: 16 });
+      b.setAttribute("aria-label", nowFav ? "Remove from My List" : "Add to My List");
+    } else {
+      b.innerHTML = `${VD.icon(nowFav ? "heartFilled" : "heart", { size: 16 })} ${nowFav ? "In My List" : "Add to My List"}`;
+    }
+  });
+  VD.toast(nowFav ? `Added “${item.title}” to My List` : `Removed “${item.title}” from My List`);
+});
+
+document.addEventListener("error", (e) => {
+  const img = e.target;
+  if (!img || img.tagName !== "IMG" || !img.classList || !img.classList.contains("vd-thumb")) return;
+  if (img.dataset.fallbackApplied) return;
+  img.dataset.fallbackApplied = "1";
+  const w = img.dataset.fallbackW ? Number(img.dataset.fallbackW) : 500;
+  const h = img.dataset.fallbackH ? Number(img.dataset.fallbackH) : 750;
+  img.src = VidoraData.localFallback(img.dataset.fallbackTitle || img.alt, w, h);
+}, true);
+
+function thumbImg(src, title, { w = 500, h = 750, cls = "", loading = "lazy" } = {}) {
+  const safeTitle = escAttr(title);
+  const finalSrc = src ? escAttr(src) : VidoraData.localFallback(title, w, h);
+  return `<img class="vd-thumb${cls ? " " + cls : ""}" src="${finalSrc}" alt="${safeTitle}" data-fallback-title="${safeTitle}" data-fallback-w="${w}" data-fallback-h="${h}" loading="${loading}" />`;
+}
+
+function starRow(rating) {
+  return `<span class="rating">${VD.icon("starFilled", { size: 13 })} ${rating ?? "—"}</span>`;
+}
+
+// ---------------- Share ----------------
+async function shareTitle(item) {
+  const url = `${location.origin}/${item.mediaType === "tv" ? "series" : "movie"}/${item.id}`;
+  if (navigator.share) {
+    try { await navigator.share({ title: item.title, text: `Watch “${item.title}” on Vidora`, url }); }
+    catch (err) { /* user cancelled the share sheet — not an error */ }
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    VD.toast("Link copied to clipboard");
+  } catch (err) {
+    VD.toast("Couldn't copy the link");
+  }
+}
+
+function shareButtonHTML() {
+  return `<button type="button" class="btn btn-ghost share-btn" id="detailShareBtn">${VD.icon("share", { size: 16 })} Share</button>`;
+}
+
+function trailerButtonHTML() {
+  return `<button type="button" class="btn btn-outline trailer-btn" id="detailTrailerBtn" hidden>${VD.icon("clapper", { size: 16 })} Watch Trailer</button>`;
+}
+
+function wireDetailActions(container, item, trailerKeyPromise, token) {
+  const shareBtn = container.querySelector("#detailShareBtn");
+  if (shareBtn) shareBtn.addEventListener("click", () => shareTitle(item));
+
+  const trailerBtn = container.querySelector("#detailTrailerBtn");
+  if (!trailerBtn) return;
+  trailerKeyPromise.then((key) => {
+    if (token !== routeToken || !key) return;
+    trailerBtn.hidden = false;
+    trailerBtn.addEventListener("click", () => {
+      VD.modal({
+        title: `${item.title} — Trailer`,
+        wide: true,
+        bodyHTML: `<div class="trailer-frame-wrap"><iframe src="https://www.youtube.com/embed/${key}?autoplay=1" title="${escAttr(item.title)} trailer" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe></div>`,
+        actions: [{ id: "close", label: "Close", variant: "btn-ghost", onClick: (close) => close() }],
+      });
+    });
+  });
+}
+
+async function paintRelatedRow(container, item, token) {
+  const related = await VidoraData.relatedTitles(item);
+  if (token !== routeToken || !related.length) return;
+  container.innerHTML = rowSection("More Like This", "similar picks", related);
+  wireRowScrollers(container);
+}
+
+function card(item) {
+  const progress = item.mediaType === "movie"
+    ? VidoraPlayer.getProgress(item.id, "movie")
+    : (item.season && item.episode ? VidoraPlayer.getProgress(item.id, "tv", item.season, item.episode) : null);
+  const bar = progress
+    ? `<div class="card-progress"><span style="width:${Math.min(progress.progress * 100, 100)}%"></span></div>`
+    : "";
+  const href = item.resumeHref
+    ? item.resumeHref
+    : item.mediaType === "tv" ? `/series/${item.id}` : `/movie/${item.id}`;
+  const metaLine = item.season && item.episode
+    ? `S${item.season}E${item.episode}`
+    : `${item.year || ""}${item.rating ? ` · ${VD.icon("starFilled", { size: 11 })} ${item.rating}` : ""}`;
+  return `
+    <a class="card" href="${href}">
+      <div class="card-poster-wrap">
+        ${thumbImg(item.poster, item.title, { w: 500, h: 750 })}
+        ${bar}
+        ${favButtonHTML(item, { compact: true })}
+      </div>
+      <div class="card-title">${escAttr(item.title)}</div>
+      <div class="card-meta">${metaLine}</div>
+    </a>`;
+}
+
+function rowSection(title, sub, items) {
+  if (!items || !items.length) return "";
+  return `
+    <section class="section">
+      <div class="wrap">
+        <div class="section-head">
+          <h2 class="section-title">${title}</h2>
+          <span class="section-sub">${sub}</span>
+        </div>
+      </div>
+      <div class="row-scroll-wrap">
+        <button type="button" class="row-nav-btn row-nav-prev" aria-label="Scroll left">${VD.icon("chevronLeft", { size: 18 })}</button>
+        <div class="row-scroll">${items.map(card).join("")}</div>
+        <button type="button" class="row-nav-btn row-nav-next" aria-label="Scroll right">${VD.icon("chevronRight", { size: 18 })}</button>
+      </div>
+    </section>`;
+}
+
+function heroSlideMarkup(item, index, isActive) {
+  const href = item.mediaType === "tv" ? `/series/${item.id}` : `/movie/${item.id}`;
+  const playHref = item.mediaType === "tv" ? href : `/watch/movie/${item.id}`;
+  return `
+    <div class="hero-slide${isActive ? " active" : ""}" data-index="${index}">
+      <div class="hero-slide-bg" style="${item.backdrop ? `background-image:url('${item.backdrop}')` : ""}"></div>
+      <div class="hero-slide-scrim"></div>
+      <div class="hero-content">
+        <div class="hero-eyebrow">Featured ${item.mediaType === "tv" ? "series" : "film"}</div>
+        <h1 class="hero-title">${item.title}</h1>
+        <div class="hero-meta">
+          ${starRow(item.rating)}
+          <span>${item.year || ""}</span>
+          ${item.runtime ? `<span>${item.runtime} min</span>` : ""}
+        </div>
+        <p class="hero-overview">${(item.overview || "").slice(0, 220)}${(item.overview || "").length > 220 ? "…" : ""}</p>
+        <div class="hero-actions">
+          <a class="btn btn-ticket" href="${playHref}">${VD.icon("playFilled", { size: 15 })} ${item.mediaType === "tv" ? "View episodes" : "Play now"}</a>
+          <a class="btn btn-ghost" href="${href}">More info</a>
+        </div>
+      </div>
+    </div>`;
+}
+
+function heroBlock(items) {
+  if (!items || !items.length) return "";
+  const slides = items.map((item, i) => heroSlideMarkup(item, i, i === 0)).join("");
+  const dots = items.length > 1
+    ? `<div class="hero-dots" role="tablist" aria-label="Featured titles">
+        ${items.map((item, i) => `<button type="button" class="hero-dot${i === 0 ? " active" : ""}" data-index="${i}" role="tab" aria-selected="${i === 0}" aria-label="Show ${item.title}"></button>`).join("")}
+      </div>`
+    : "";
+  return `
+    <section class="hero" id="heroSection">${slides}${dots}</section>
+    <div class="perf perf-top"></div>`;
+}
+
+let heroInterval = null;
+function stopHeroRotation() {
+  if (heroInterval) { clearInterval(heroInterval); heroInterval = null; }
+}
+function prefersReducedMotion() {
+  return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function wireHeroRotation(items) {
+  stopHeroRotation();
+  const hero = document.getElementById("heroSection");
+  if (!hero || !items || items.length < 2) return;
+
+  const slides = [...hero.querySelectorAll(".hero-slide")];
+  const dots = [...hero.querySelectorAll(".hero-dot")];
+  let index = 0;
+
+  function show(i) {
+    index = (i + items.length) % items.length;
+    slides.forEach((s, si) => s.classList.toggle("active", si === index));
+    dots.forEach((d, di) => {
+      d.classList.toggle("active", di === index);
+      d.setAttribute("aria-selected", String(di === index));
+    });
+  }
+
+  function restart() {
+    stopHeroRotation();
+    if (prefersReducedMotion()) return;
+    heroInterval = setInterval(() => show(index + 1), 7000);
+  }
+
+  dots.forEach((d) => d.addEventListener("click", () => { show(Number(d.dataset.index)); restart(); }));
+  hero.addEventListener("mouseenter", stopHeroRotation);
+  hero.addEventListener("mouseleave", restart);
+
+  restart();
+}
+
+// Bumped on every route() call so slow/late responses from a page the
+// person already navigated away from get dropped instead of clobbering
+// whatever's actually on screen.
+let routeToken = 0;
+
+function backBar(label, fallbackPath) {
+  return `<div class="page-back-row"><button type="button" class="back-btn" data-fallback="${fallbackPath}">${VD.icon("arrowLeft", { size: 15 })} ${label}</button></div>`;
+}
+
+function heroBackButton(fallbackPath) {
+  return `<button type="button" class="hero-back-btn" data-fallback="${fallbackPath}" aria-label="Go back">${VD.icon("arrowLeft", { size: 19 })}</button>`;
+}
+
+function wireBackButtons(container) {
+  container.querySelectorAll("[data-fallback]").forEach((btn) => {
+    btn.addEventListener("click", () => goBack(btn.dataset.fallback));
+  });
+}
+
+// ---------------- card row: nav buttons + click-drag scrolling ----------------
+let rowDrag = null;
+let rowDragJustMoved = false;
+
+window.addEventListener("mousemove", (e) => {
+  if (!rowDrag) return;
+  const dx = e.pageX - rowDrag.startX;
+  if (Math.abs(dx) > 4) rowDrag.moved = true;
+  rowDrag.track.scrollLeft = rowDrag.startScroll - dx;
+});
+window.addEventListener("mouseup", () => {
+  if (!rowDrag) return;
+  rowDrag.track.classList.remove("dragging");
+  rowDragJustMoved = rowDrag.moved;
+  rowDrag = null;
+});
+
+let rowScrollerCleanups = [];
+function teardownRowScrollers() {
+  rowScrollerCleanups.forEach((fn) => { try { fn(); } catch (err) {} });
+  rowScrollerCleanups = [];
+}
+
+function wireRowScrollers(container) {
+  teardownRowScrollers();
+  container.querySelectorAll(".row-scroll-wrap").forEach((wrap) => {
+    const track = wrap.querySelector(".row-scroll");
+    const prevBtn = wrap.querySelector(".row-nav-prev");
+    const nextBtn = wrap.querySelector(".row-nav-next");
+    if (!track) return;
+
+    function updateButtons() {
+      const max = track.scrollWidth - track.clientWidth - 1;
+      if (prevBtn) prevBtn.disabled = track.scrollLeft <= 0;
+      if (nextBtn) nextBtn.disabled = max <= 0 || track.scrollLeft >= max;
+    }
+    if (prevBtn) prevBtn.addEventListener("click", () => track.scrollBy({ left: -track.clientWidth * 0.85, behavior: "smooth" }));
+    if (nextBtn) nextBtn.addEventListener("click", () => track.scrollBy({ left: track.clientWidth * 0.85, behavior: "smooth" }));
+    track.addEventListener("scroll", updateButtons, { passive: true });
+    updateButtons();
+
+    let ro = null;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(() => updateButtons());
+      ro.observe(track);
+    } else {
+      window.addEventListener("resize", updateButtons);
+    }
+    const needsLoadListener = document.readyState !== "complete";
+    if (needsLoadListener) window.addEventListener("load", updateButtons, { once: true });
+
+    rowScrollerCleanups.push(() => {
+      if (ro) ro.disconnect();
+      window.removeEventListener("resize", updateButtons);
+      if (needsLoadListener) window.removeEventListener("load", updateButtons);
+    });
+
+    track.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      rowDrag = { track, startX: e.pageX, startScroll: track.scrollLeft, moved: false };
+      track.classList.add("dragging");
+    });
+    track.addEventListener("click", (e) => {
+      if (rowDragJustMoved) {
+        rowDragJustMoved = false;
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, true);
+  });
+}
+
+function loadingState() {
+  return `<div class="empty-state"><div class="vd-spinner" aria-hidden="true">${VD.icon("sparkle", { size: 30 })}</div><h3>Loading…</h3></div>`;
+}
+
+function emptyState(title, sub) {
+  return `<div class="empty-state"><div class="empty-state-icon" aria-hidden="true">${VD.icon("search", { size: 28 })}</div><h3>${title}</h3><p>${sub}</p></div>`;
+}
+
+// ---------------- pages ----------------
+
+async function renderHome(token) {
+  app.innerHTML = loadingState();
+  const [trendingMovies, popularMovies, trendingShows, topRated] = await Promise.all([
+    VidoraData.trendingMovies(), VidoraData.popularMovies(),
+    VidoraData.trendingShows(), VidoraData.topRatedMovies(),
+  ]);
+  if (token !== routeToken) return;
+  const featured = [...trendingMovies.slice(0, 3), ...trendingShows.slice(0, 2)];
+  if (!featured.length) featured.push(...popularMovies.slice(0, 3));
+  const cw = VidoraPlayer.getContinueWatching();
+  const cwItems = cw.map((c) => ({
+    id: c.id, title: c.title, mediaType: c.mediaType, poster: c.poster,
+    year: "", rating: null, season: c.season, episode: c.episode,
+    resumeHref: c.mediaType === "tv"
+      ? `/watch/series/${c.id}/${c.season}/${c.episode}`
+      : `/watch/movie/${c.id}`,
+  }));
+
+  app.innerHTML = `
+    ${heroBlock(featured)}
+    ${rowSection("Continue Watching", "pick up where you left off", cwItems)}
+    ${rowSection("My List", "saved for later", getMyList())}
+    ${rowSection("Trending Now", "movies", trendingMovies)}
+    ${rowSection("Trending Series", "shows", trendingShows)}
+    ${rowSection("Popular Movies", "on Vidora", popularMovies)}
+    ${rowSection("Top Rated", "critics' picks", topRated)}
+  `;
+  wireHeroRotation(featured);
+  wireRowScrollers(app);
+}
+
+async function renderGrid(kind, token) {
+  app.innerHTML = `
+    <div class="wrap">
+      <div class="grid-page-head">
+        ${backBar("Back", "/")}
+        <h1 class="grid-page-title">${kind === "movies" ? "Movies" : "Series"}</h1>
+        <p class="grid-page-desc">${kind === "movies" ? "Everything from new releases to all-time favorites." : "Full seasons, ready whenever you are."}</p>
+        <div class="chip-row" id="genreChips"></div>
+      </div>
+      <div class="poster-grid" id="gridItems">${loadingState()}</div>
+    </div>`;
+  wireBackButtons(app);
+
+  const [a, b, c] = kind === "movies"
+    ? await Promise.all([VidoraData.trendingMovies(), VidoraData.popularMovies(), VidoraData.topRatedMovies()])
+    : await Promise.all([VidoraData.trendingShows(), VidoraData.popularShows(), VidoraData.topRatedShows()]);
+  if (token !== routeToken) return;
+
+  const map = new Map();
+  [...a, ...b, ...c].forEach((it) => map.set(it.id, it));
+  const items = [...map.values()];
+  const genres = [...new Set(items.flatMap((i) => i.genres || []))].sort();
+
+  const chips = document.getElementById("genreChips");
+  chips.innerHTML = ["All", ...genres].map((g, i) =>
+    `<button class="chip ${i === 0 ? "active" : ""}" data-genre="${g}">${g}</button>`).join("");
+
+  function paint(genre) {
+    const filtered = genre === "All" ? items : items.filter((i) => (i.genres || []).includes(genre));
+    document.getElementById("gridItems").innerHTML = filtered.length
+      ? filtered.map(card).join("")
+      : emptyState("Nothing here yet", "Try a different genre.");
+  }
+  paint("All");
+  chips.addEventListener("click", (e) => {
+    const btn = e.target.closest(".chip");
+    if (!btn) return;
+    chips.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
+    btn.classList.add("active");
+    paint(btn.dataset.genre);
+  });
+}
+
+function renderMyList() {
+  const items = getMyList();
+  app.innerHTML = `
+    <div class="wrap">
+      <div class="grid-page-head">
+        ${backBar("Back", "/")}
+        <h1 class="grid-page-title">My List</h1>
+        <p class="grid-page-desc">Titles you've saved to watch later — tap the heart on any poster to add or remove one.</p>
+      </div>
+      ${items.length
+        ? `<div class="poster-grid">${items.map(card).join("")}</div>`
+        : emptyState("Your list is empty", "Tap the heart on any movie or series to save it here.")}
+    </div>`;
+  wireBackButtons(app);
+}
+
+async function renderMovieDetail(id, token) {
+  app.innerHTML = loadingState();
+  const m = await VidoraData.movieDetails(id);
+  if (token !== routeToken) return;
+  if (!m) { app.innerHTML = emptyState("Not found", "That title isn't available."); return; }
+  app.innerHTML = `
+    <section class="detail-hero" style="background-image:url('${m.backdrop}')">
+      ${heroBackButton("/movies")}
+    </section>
+    <div class="wrap detail-body">
+      <div class="detail-poster">${thumbImg(m.poster, m.title, { w: 500, h: 750 })}</div>
+      <div class="detail-main">
+        <h1 class="detail-title">${m.title}</h1>
+        <div class="detail-meta">${starRow(m.rating)}<span>${m.year || ""}</span>${m.runtime ? `<span>${m.runtime} min</span>` : ""}</div>
+        <div class="genre-tags">${(m.genres || []).map((g) => `<span class="genre-tag">${g}</span>`).join("")}</div>
+        <p class="detail-overview">${m.overview || ""}</p>
+        <div class="detail-actions">
+          <a class="btn btn-ticket" href="/watch/movie/${m.id}">${VD.icon("playFilled", { size: 15 })} Play movie</a>
+          ${trailerButtonHTML()}
+          ${favButtonHTML(m)}
+          ${shareButtonHTML()}
+        </div>
+      </div>
+    </div>
+    <div id="relatedRow"></div>`;
+  wireBackButtons(app);
+  wireDetailActions(app, m, VidoraData.movieTrailerKey(m.id), token);
+  paintRelatedRow(document.getElementById("relatedRow"), m, token);
+}
+
+async function renderSeriesDetail(id, seasonParam, token) {
+  app.innerHTML = loadingState();
+  const s = await VidoraData.showDetails(id);
+  if (token !== routeToken) return;
+  if (!s) { app.innerHTML = emptyState("Not found", "That title isn't available."); return; }
+  const seasonNum = Number(seasonParam) || s.seasons[0]?.season_number || 1;
+  const season = await VidoraData.seasonDetails(id, seasonNum);
+  if (token !== routeToken) return;
+  if (!season) { app.innerHTML = emptyState("Not found", "That season isn't available."); return; }
+
+  app.innerHTML = `
+    <section class="detail-hero" style="background-image:url('${s.backdrop}')">
+      ${heroBackButton("/series")}
+    </section>
+    <div class="wrap detail-body">
+      <div class="detail-poster">${thumbImg(s.poster, s.title, { w: 500, h: 750 })}</div>
+      <div class="detail-main">
+        <h1 class="detail-title">${s.title}</h1>
+        <div class="detail-meta">${starRow(s.rating)}<span>${s.year || ""}</span><span>${s.seasons.length} season${s.seasons.length > 1 ? "s" : ""}</span></div>
+        <div class="genre-tags">${(s.genres || []).map((g) => `<span class="genre-tag">${g}</span>`).join("")}</div>
+        <p class="detail-overview">${s.overview || ""}</p>
+        <div class="detail-actions">
+          <a class="btn btn-ticket" href="/watch/series/${id}/${seasonNum}/${season.episodes[0]?.episode_number || 1}">${VD.icon("playFilled", { size: 15 })} Play Season ${seasonNum}</a>
+          ${trailerButtonHTML()}
+          ${favButtonHTML(s)}
+          ${shareButtonHTML()}
+        </div>
+
+        <div class="season-picker">
+          <span id="seasonPickerLabel">Season</span>
+          <div id="seasonDropdown"></div>
+        </div>
+
+        <div class="episode-list" id="episodeList">
+          ${season.episodes.map((e) => `
+            <div class="episode-row">
+              <div class="episode-num">${String(e.episode_number).padStart(2, "0")}</div>
+              <div class="episode-thumb">${thumbImg(e.still, `${s.title} — ${e.name}`, { w: 300, h: 169 })}</div>
+              <div>
+                <div class="episode-name">${e.name}</div>
+                <div class="episode-overview">${e.overview || ""}</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:14px;">
+                <span class="episode-runtime">${e.runtime ? e.runtime + " min" : ""}</span>
+                <a class="episode-play" href="/watch/series/${id}/${seasonNum}/${e.episode_number}" title="Play episode ${e.episode_number}">${VD.icon("playFilled", { size: 14 })}</a>
+              </div>
+            </div>`).join("")}
+        </div>
+      </div>
+    </div>
+    <div id="relatedRow"></div>`;
+  wireBackButtons(app);
+
+  VD.dropdown({
+    mount: document.getElementById("seasonDropdown"),
+    options: s.seasons.map((se) => ({ value: se.season_number, label: se.name || `Season ${se.season_number}` })),
+    selected: seasonNum,
+    ariaLabel: "Select season",
+    onChange: (value) => { navigate(`/series/${id}/${value}`); },
+  });
+  wireDetailActions(app, s, VidoraData.showTrailerKey(id), token);
+  paintRelatedRow(document.getElementById("relatedRow"), s, token);
+}
+
+const RESUME_MIN_SECONDS = 15;
+function offerResume(progress, buildResumedSrc) {
+  if (!progress || !progress.currentTime || progress.currentTime < RESUME_MIN_SECONDS) return;
+  if (progress.duration && progress.progress >= 0.95) return;
+
+  const mins = Math.floor(progress.currentTime / 60);
+  const secs = Math.floor(progress.currentTime % 60).toString().padStart(2, "0");
+  const timeLabel = `${mins}:${secs}`;
+
+  VD.modal({
+    title: "Resume where you left off?",
+    sub: `You were at ${timeLabel}.`,
+    actions: [
+      { id: "restart", label: "Start over", variant: "btn-ghost", onClick: (close) => close() },
+      { id: "resume", label: `Resume at ${timeLabel}`, variant: "btn-primary", onClick: (close) => {
+          const iframe = document.querySelector(".player-frame-wrap iframe");
+          if (iframe) iframe.src = buildResumedSrc(progress.currentTime);
+          close();
+        } },
+    ],
+  });
+}
+
+function playerDetailsBlock(item, features) {
+  return `
+    <div class="player-details">
+      <div class="player-details-main">
+        <div class="detail-meta">
+          ${starRow(item.rating)}
+          ${item.year ? `<span>${item.year}</span>` : ""}
+          ${item.runtime ? `<span>${item.runtime} min</span>` : ""}
+        </div>
+        ${(item.genres || []).length ? `<div class="genre-tags">${item.genres.map((g) => `<span class="genre-tag">${g}</span>`).join("")}</div>` : ""}
+        ${item.overview ? `<p class="player-overview">${item.overview}</p>` : ""}
+      </div>
+      <ul class="player-features">
+        ${features.map((f) => `<li><span class="pf-icon" aria-hidden="true">${f.icon}</span>${f.label}</li>`).join("")}
+      </ul>
+    </div>`;
+}
+
+async function renderWatchMovie(id, token) {
+  app.innerHTML = loadingState();
+  const m = await VidoraData.movieDetails(id);
+  if (token !== routeToken) return;
+  if (!m) { app.innerHTML = emptyState("Not found", "That title isn't available."); return; }
+  const partyState = VidoraParty.isGuest() && VidoraParty.getMediaMeta() &&
+    String(VidoraParty.getMediaMeta().id) === String(id) && VidoraParty.getMediaMeta().mediaType === "movie"
+    ? VidoraParty.getLastState() : null;
+  const progress = VidoraPlayer.getProgress(id, "movie");
+  const src = partyState
+    ? VidoraPlayer.movieUrl(id, partyState.currentTime || 0, partyState.event !== "pause")
+    : VidoraPlayer.movieUrl(id, 0);
+
+  app.innerHTML = `
+    <div class="wrap player-page">
+      <div class="player-topbar">
+        <a class="player-back" href="/movie/${id}">${VD.icon("arrowLeft", { size: 15 })} Back</a>
+        <span class="player-title">${m.title}</span>
+      </div>
+      <div class="player-frame-wrap">
+        <iframe src="${src}" allowfullscreen allow="autoplay; fullscreen"></iframe>
+      </div>
+      ${playerDetailsBlock(m, [
+        { icon: VD.icon("save", { size: 15 }), label: "Progress is saved automatically as you watch" },
+        { icon: VD.icon("users", { size: 15 }), label: "Start a Watch Party to watch in sync with friends" },
+        { icon: VD.icon("maximize", { size: 15 }), label: "Full screen playback on any device" },
+      ])}
+      <div id="partyContainer"></div>
+    </div>`;
+
+  VidoraPlayer.init({ id, title: m.title, mediaType: "movie", poster: m.poster }, VidoraParty.createHostSync());
+
+  PartyUI.mount(document.getElementById("partyContainer"), {
+    mediaType: "movie", id, title: m.title, poster: m.poster,
+    getIframe: () => document.querySelector(".player-frame-wrap iframe"),
+    buildSrc: (t, autoplay) => VidoraPlayer.movieUrl(id, t, autoplay),
+  });
+
+  if (!partyState) offerResume(progress, (t) => VidoraPlayer.movieUrl(id, t, true));
+}
+
+async function renderWatchSeries(id, season, episode, token) {
+  app.innerHTML = loadingState();
+  const [s, se] = await Promise.all([VidoraData.showDetails(id), VidoraData.seasonDetails(id, season)]);
+  if (token !== routeToken) return;
+  if (!s) { app.innerHTML = emptyState("Not found", "That title isn't available."); return; }
+  const ep = se.episodes.find((e) => e.episode_number === Number(episode));
+  const partyState = VidoraParty.isGuest() && VidoraParty.getMediaMeta() &&
+    String(VidoraParty.getMediaMeta().id) === String(id) && VidoraParty.getMediaMeta().mediaType === "tv" &&
+    String(VidoraParty.getMediaMeta().season) === String(season) && String(VidoraParty.getMediaMeta().episode) === String(episode)
+    ? VidoraParty.getLastState() : null;
+  const progress = VidoraPlayer.getProgress(id, "tv", season, episode);
+  const src = partyState
+    ? VidoraPlayer.tvUrl(id, season, episode, partyState.currentTime || 0, partyState.event !== "pause")
+    : VidoraPlayer.tvUrl(id, season, episode, 0);
+
+  app.innerHTML = `
+    <div class="wrap player-page">
+      <div class="player-topbar">
+        <a class="player-back" href="/series/${id}/${season}">${VD.icon("arrowLeft", { size: 15 })} Back to episodes</a>
+        <span class="player-title">${s.title} · S${season}E${episode}${ep ? " — " + ep.name : ""}</span>
+      </div>
+      <div class="player-frame-wrap">
+        <iframe src="${src}" allowfullscreen allow="autoplay; fullscreen"></iframe>
+      </div>
+      ${playerDetailsBlock(
+        { rating: s.rating, year: s.year, genres: s.genres, runtime: ep && ep.runtime, overview: (ep && ep.overview) || s.overview },
+        [
+          { icon: VD.icon("save", { size: 15 }), label: "Progress is saved automatically per episode" },
+          { icon: VD.icon("skipForward", { size: 15 }), label: "Auto-plays the next episode when this one ends" },
+          { icon: VD.icon("users", { size: 15 }), label: "Start a Watch Party to watch in sync with friends" },
+        ],
+      )}
+      <div id="partyContainer"></div>
+    </div>`;
+
+  VidoraPlayer.init({ id, title: s.title, mediaType: "tv", poster: s.poster, season, episode }, VidoraParty.createHostSync());
+
+  PartyUI.mount(document.getElementById("partyContainer"), {
+    mediaType: "tv", id, season, episode, title: s.title, poster: s.poster,
+    getIframe: () => document.querySelector(".player-frame-wrap iframe"),
+    buildSrc: (t, autoplay) => VidoraPlayer.tvUrl(id, season, episode, t, autoplay),
+  });
+
+  if (!partyState) offerResume(progress, (t) => VidoraPlayer.tvUrl(id, season, episode, t, true));
+}
+
+async function renderSearch(query, token) {
+  app.innerHTML = `
+    <div class="wrap">
+      <div class="grid-page-head">
+        <h1 class="grid-page-title">Results for “${query}”</h1>
+      </div>
+      <div id="searchResults">${loadingState()}</div>
+    </div>`;
+  const { movies, shows } = await VidoraData.search(query);
+  if (token !== routeToken) return;
+  const el = document.getElementById("searchResults");
+  if (!movies.length && !shows.length) {
+    el.innerHTML = emptyState("No matches", "Try a different title or keyword.");
+    return;
+  }
+  el.innerHTML = `
+    ${movies.length ? `<h2 class="section-title" style="margin:20px 0 14px;">Movies</h2><div class="poster-grid">${movies.map(card).join("")}</div>` : ""}
+    ${shows.length ? `<h2 class="section-title" style="margin:20px 0 14px;">Series</h2><div class="poster-grid">${shows.map(card).join("")}</div>` : ""}
+  `;
+}
+
+// ---------------- router ----------------
+
+function setActiveNav(routeName) {
+  document.querySelectorAll(".nav-links a, .mobile-menu-links a").forEach((a) => {
+    const isActive = a.dataset.route === routeName;
+    a.classList.toggle("active", isActive);
+    if (isActive) a.setAttribute("aria-current", "page");
+    else a.removeAttribute("aria-current");
+  });
+}
+
+function playPageTransition() {
+  app.classList.remove("page-anim");
+  void app.offsetWidth;
+  app.classList.add("page-anim");
+}
+
+async function route() {
+  const myToken = ++routeToken;
+  const parts = location.pathname.replace(/^\//, "").split("/").filter(Boolean);
+  window.scrollTo(0, 0);
+  closeMobileMenu();
+  stopHeroRotation();
+  playPageTransition();
+
+  const routeName = parts.length === 0 ? "home" : (["movies", "series", "list"].includes(parts[0]) ? parts[0] : (parts[0] === "home" ? "home" : ""));
+  setActiveNav(routeName);
+
+  try {
+    if (parts.length === 0 || parts[0] === "home") return renderHome(myToken);
+    if (parts[0] === "movies") return renderGrid("movies", myToken);
+    if (parts[0] === "series" && parts.length === 1) return renderGrid("series", myToken);
+    if (parts[0] === "list") return renderMyList();
+    if (parts[0] === "movie" && parts[1]) return renderMovieDetail(parts[1], myToken);
+    if (parts[0] === "series" && parts[1]) return renderSeriesDetail(parts[1], parts[2], myToken);
+    if (parts[0] === "watch" && parts[1] === "movie" && parts[2]) return renderWatchMovie(parts[2], myToken);
+    if (parts[0] === "watch" && parts[1] === "series" && parts[2] && parts[3] && parts[4]) return renderWatchSeries(parts[2], parts[3], parts[4], myToken);
+    if (parts[0] === "party" && parts[1]) return PartyUI.renderJoinPage(app, parts[1]);
+    if (parts[0] === "search" && parts[1]) return renderSearch(decodeURIComponent(parts[1]), myToken);
+    app.innerHTML = emptyState("Page not found", "Let's get you back home.");
+  } catch (err) {
+    console.error(err);
+    app.innerHTML = emptyState("Something went wrong", "Please try again in a moment.");
+  }
+}
+
+// ---------------- chrome: search, mobile nav ----------------
+
+let surpriseInFlight = false;
+async function goSurpriseMe() {
+  if (surpriseInFlight) return;
+  surpriseInFlight = true;
+  VD.toast("Finding something to watch…");
+  try {
+    const pick = await VidoraData.randomTitle();
+    if (!pick) { VD.toast("Couldn't find anything right now — try again in a moment."); return; }
+    navigate(pick.mediaType === "tv" ? `/series/${pick.id}` : `/movie/${pick.id}`);
+  } catch (err) {
+    console.error(err);
+    VD.toast("Couldn't find anything right now — try again in a moment.");
+  } finally {
+    surpriseInFlight = false;
+  }
+}
+
+function wireSearchInput(input) {
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && input.value.trim()) {
+      closeMobileMenu();
+      navigate(`/search/${encodeURIComponent(input.value.trim())}`);
+    }
+  });
+}
+wireSearchInput(document.getElementById("searchInput"));
+wireSearchInput(document.getElementById("mobileSearchInput"));
+
+document.getElementById("navSurprise").addEventListener("click", goSurpriseMe);
+document.getElementById("mobileSurprise").addEventListener("click", () => {
+  closeMobileMenu();
+  goSurpriseMe();
+});
+
+// ---------------- fullscreen mobile menu ----------------
+const navToggle = document.getElementById("navToggle");
+const mobileMenu = document.getElementById("mobileMenu");
+const mobileMenuClose = document.getElementById("mobileMenuClose");
+
+function openMobileMenu() {
+  mobileMenu.classList.add("open");
+  requestAnimationFrame(() => mobileMenu.classList.add("animate-in"));
+  navToggle.classList.add("is-open");
+  navToggle.setAttribute("aria-expanded", "true");
+  navToggle.setAttribute("aria-label", "Close menu");
+  document.body.classList.add("no-scroll");
+  mobileMenuClose.focus();
+}
+function closeMobileMenu() {
+  const wasOpen = mobileMenu.classList.contains("open");
+  mobileMenu.classList.remove("open", "animate-in");
+  navToggle.classList.remove("is-open");
+  navToggle.setAttribute("aria-expanded", "false");
+  navToggle.setAttribute("aria-label", "Open menu");
+  document.body.classList.remove("no-scroll");
+  return wasOpen;
+}
+navToggle.addEventListener("click", () => {
+  mobileMenu.classList.contains("open") ? closeMobileMenu() : openMobileMenu();
+});
+mobileMenuClose.addEventListener("click", () => { closeMobileMenu(); navToggle.focus(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (closeMobileMenu()) navToggle.focus();
+});
+
+// This script runs at the end of <body> with no defer/async, so the DOM is
+// already ready here — calling route() once, directly, is correct.
+route();

@@ -21,6 +21,11 @@ export default async function handler(req, res) {
   if (!apiKey) return res.status(503).json({ error: 'demo_mode' });
 
   const pathParts = Array.isArray(req.query.path) ? req.query.path : [req.query.path];
+  // Expect client calls like /api/tmdb/<tmdb-path>. The catch-all receives the
+  // full path (including the "tmdb" segment) so strip it if present so we
+  // forward the correct path to TMDB (e.g. /trending/movie/week, not
+  // /tmdb/trending/movie/week).
+  if (pathParts[0] === 'tmdb') pathParts.shift();
   const tmdbPath = '/' + pathParts.filter(Boolean).join('/');
 
   const url = new URL(TMDB_BASE + tmdbPath);

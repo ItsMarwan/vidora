@@ -1,12 +1,20 @@
-import { assertOriginAllowed, getClientIp, rateLimit } from './lib/security.js';
+import { assertOriginAllowed, getClientIp, rateLimit } from './_lib/security.js';
 
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 
-// The client calls /api/tmdb/<same path TMDB itself uses>, e.g.
-//   /api/tmdb/trending/movie/week
-//   /api/tmdb/movie/12345
+// Only ever allow the shape of path TMDB itself uses: a leading slash then
+// letters, numbers, slashes, underscores and hyphens. Blocks anything that
+// could be used to break out of the TMDB_BASE prefix or inject query
+// syntax through the path itself.
+const SAFE_PATH = /^\/[a-zA-Z0-9/_-]*$/;
+
+// The client calls /api/tmdb?path=<same path TMDB itself uses>, e.g.
+//   /api/tmdb?path=/trending/movie/week
+//   /api/tmdb?path=/movie/12345
 // This forwards it to TMDB with the real API key attached server-side —
-// the key is never sent to, or visible from, the browser.
+// the key is never sent to, or visible from, the browser. A single flat
+// file (no [...catch-all] segment) so there's no dynamic route pattern
+// that could be mis-resolved.
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
   if (!assertOriginAllowed(req)) return res.status(403).json({ error: 'Forbidden origin' });
@@ -20,15 +28,12 @@ export default async function handler(req, res) {
   const apiKey = process.env.TMDB_API_KEY;
   if (!apiKey) return res.status(503).json({ error: 'demo_mode' });
 
-  const pathParts = Array.isArray(req.query.path) ? req.query.path : [req.query.path];
-  // Expect client calls like /api/tmdb/<tmdb-path>. The catch-all receives the
-  // full path (including the "tmdb" segment) so strip it if present so we
-  // forward the correct path to TMDB (e.g. /trending/movie/week, not
-  // /tmdb/trending/movie/week).
-  if (pathParts[0] === 'tmdb') pathParts.shift();
-  const tmdbPath = '/' + pathParts.filter(Boolean).join('/');
+  const rawPath = typeof req.query.path === 'string' ? req.query.path : Array.isArray(req.query.path) ? req.query.path[0] : '';
+  if (!rawPath || !SAFE_PATH.test(rawPath)) {
+    return res.status(400).json({ error: 'Invalid or missing path' });
+  }
 
-  const url = new URL(TMDB_BASE + tmdbPath);
+  const url = new URL(TMDB_BASE + rawPath);
   url.searchParams.set('api_key', apiKey);
   for (const [key, value] of Object.entries(req.query)) {
     if (key === 'path') continue;

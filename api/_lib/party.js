@@ -1,3 +1,8 @@
+/**
+ * VIDORA — WATCH PARTY: ROOM HELPERS
+ * Lives under api/_lib/ (underscore prefix) so Vercel treats it as a plain
+ * importable module instead of building it as its own serverless function.
+ */
 import crypto from 'crypto';
 import kv from './kv.js';
 
@@ -32,6 +37,7 @@ export function publicParticipants(room) {
 }
 
 export async function getRoom(roomId) {
+  if (!roomId) return null;
   const raw = await kv.get(getRoomKey(roomId));
   if (!raw) return null;
   return typeof raw === 'string' ? JSON.parse(raw) : raw;

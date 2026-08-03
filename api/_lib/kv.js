@@ -3,6 +3,9 @@
  * place to import from. In local development, if the required KV env vars
  * are not present, we fall back to an in-memory store so the app can still
  * run without needing Redis configured.
+ *
+ * Lives under api/_lib/ (underscore prefix) so Vercel treats it as a plain
+ * importable module instead of building it as its own serverless function.
  */
 import { kv as vercelKv } from '@vercel/kv';
 

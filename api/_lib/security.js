@@ -3,6 +3,9 @@
  * Used by every /api/* route: an origin allowlist ("origin lock") and a
  * simple IP-based rate limiter backed by the same KV store the rest of the
  * app already uses (no extra service to set up).
+ *
+ * Lives under api/_lib/ (underscore prefix) so Vercel treats it as a plain
+ * importable module instead of building it as its own serverless function.
  */
 import kv from './kv.js';
 

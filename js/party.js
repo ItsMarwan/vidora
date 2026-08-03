@@ -2,8 +2,8 @@
  * VIDORA — WATCH PARTY (server-relayed)
  * -----------------------------------------------------------
  * No PeerJS, no WebRTC, no direct connection between participants'
- * browsers at all. Every action goes through /api/party/* on your own
- * Vercel deployment, backed by KV:
+ * browsers at all. Every action goes through the single /api/party
+ * endpoint on your own Vercel deployment, backed by KV:
  *   - createRoom / joinRoom hit the server, which owns the password check
  *     and hands back a per-participant token.
  *   - The host pushes playback events to the server immediately.
@@ -12,6 +12,10 @@
  * This trades a little latency (poll interval, instead of an instant
  * WebRTC push) for never exposing anyone's IP to anyone else, and for
  * running entirely on infrastructure you already control.
+ *
+ * The server route is one flat file (no nested URL segments) — every
+ * call here goes to /api/party with an `action` field (query string for
+ * GET, JSON body for POST) instead of a path like /api/party/<room>/state.
  *
  * Public API is intentionally unchanged from the old peer-to-peer version
  * so party-ui.js didn't need to change at all.
@@ -51,11 +55,22 @@ const VidoraParty = (() => {
     };
   }
 
-  async function api(path, opts = {}) {
-    const res = await fetch(`/api/party${path}`, {
-      method: opts.method || "GET",
-      headers: opts.body ? { "Content-Type": "application/json" } : undefined,
-      body: opts.body ? JSON.stringify(opts.body) : undefined,
+  // Single flat endpoint. `action` goes in the query string for GET
+  // requests and in the JSON body for POST requests — never in the URL
+  // path, so there's no dynamic route segment involved on either end.
+  async function api(action, { method = "GET", query = null, body = null } = {}) {
+    let url = "/api/party";
+    let fetchBody;
+    if (method === "GET") {
+      const params = new URLSearchParams({ action, ...(query || {}) });
+      url += `?${params.toString()}`;
+    } else {
+      fetchBody = JSON.stringify({ action, ...(body || {}) });
+    }
+    const res = await fetch(url, {
+      method,
+      headers: fetchBody ? { "Content-Type": "application/json" } : undefined,
+      body: fetchBody,
     });
     let data = null;
     try { data = await res.json(); } catch { /* no/invalid body */ }
@@ -95,7 +110,7 @@ const VidoraParty = (() => {
     pollTimer = setInterval(async () => {
       if (!roomId || !myToken) return;
       try {
-        const data = await api(`/${roomId}/state?token=${encodeURIComponent(myToken)}`);
+        const data = await api("state", { query: { roomId, token: myToken } });
         applyPoll(data);
       } catch (err) {
         stopPolling();
@@ -106,7 +121,7 @@ const VidoraParty = (() => {
 
   async function createRoom(meta, password, hostName) {
     leaveRoom(); // guard against a leaked, still-live room if createRoom is called again
-    const data = await api("/create", { method: "POST", body: { name: hostName, password, mediaMeta: meta } });
+    const data = await api("create", { method: "POST", body: { name: hostName, password, mediaMeta: meta } });
     role = "host"; roomId = data.roomId; myToken = data.hostToken;
     myName = (hostName || "Host").slice(0, 20); myPassword = password;
     mediaMeta = cleanMeta(meta); lastState = null;
@@ -118,7 +133,7 @@ const VidoraParty = (() => {
 
   async function joinRoom(code, password, name) {
     leaveRoom();
-    const data = await api("/join", { method: "POST", body: { roomId: code, password, name } });
+    const data = await api("join", { method: "POST", body: { roomId: code, password, name } });
     role = "guest"; roomId = String(code).toLowerCase(); myToken = data.guestToken;
     myName = (name || "Guest").slice(0, 20);
     mediaMeta = data.mediaMeta; lastState = data.lastState; participants = data.participants || [];
@@ -133,8 +148,11 @@ const VidoraParty = (() => {
       // Best-effort, fire-and-forget notice so the server (and everyone
       // else) finds out immediately instead of waiting for a poll to fail.
       try {
-        const payload = new Blob([JSON.stringify({ token: myToken })], { type: "application/json" });
-        if (navigator.sendBeacon) navigator.sendBeacon(`/api/party/${roomId}/leave`, payload);
+        const payload = new Blob(
+          [JSON.stringify({ action: "leave", roomId, token: myToken })],
+          { type: "application/json" },
+        );
+        if (navigator.sendBeacon) navigator.sendBeacon("/api/party", payload);
       } catch (err) { /* best effort only */ }
     }
     role = null; roomId = null; myToken = null; myName = null; myPassword = null;
@@ -144,7 +162,7 @@ const VidoraParty = (() => {
   function broadcastState(stateObj) {
     if (role !== "host") return;
     lastState = stateObj;
-    api(`/${roomId}/state`, { method: "POST", body: { token: myToken, ...stateObj } })
+    api("state", { method: "POST", body: { roomId, token: myToken, ...stateObj } })
       .catch((err) => console.warn("[Watch Party] failed to push state:", err));
   }
 
@@ -153,7 +171,7 @@ const VidoraParty = (() => {
     mediaMeta = cleanMeta(meta);
     lastState = null;
     try {
-      await api(`/${roomId}/media`, { method: "POST", body: { token: myToken, mediaMeta } });
+      await api("media", { method: "POST", body: { roomId, token: myToken, mediaMeta } });
     } catch (err) {
       console.warn("[Watch Party] failed to update media:", err);
     }

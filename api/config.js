@@ -1,4 +1,4 @@
-import { assertOriginAllowed } from './lib/security.js';
+import { assertOriginAllowed } from './_lib/security.js';
 
 // Client-safe settings only. Secrets and API keys stay server-side.
 export default function handler(req, res) {

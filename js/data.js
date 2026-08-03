@@ -127,11 +127,13 @@ const VidoraData = (() => {
   const demoShowsDecorated = demoShows.map((s) => decorate(s, true));
 
   // ---------- server proxy fetch helper ----------
-  // Calls YOUR OWN /api/tmdb/<path> endpoint (same relative path TMDB
-  // itself would use) instead of TMDB directly. The real key is attached
+  // Calls YOUR OWN /api/tmdb endpoint, passing the same relative path TMDB
+  // itself would use as a ?path= query param (e.g. ?path=/movie/12345)
+  // instead of appending it to the URL path. The real key is attached
   // server-side; this call carries none of it.
   async function tmdb(path, params = {}) {
-    const url = new URL(`${location.origin}${VIDORA_CONFIG.API_BASE}/tmdb${path}`);
+    const url = new URL(`${location.origin}${VIDORA_CONFIG.API_BASE}/tmdb`);
+    url.searchParams.set("path", path);
     Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
     const res = await fetch(url.toString());
     if (!res.ok) throw new Error(`Vidora API error ${res.status}`);

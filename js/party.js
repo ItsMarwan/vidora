@@ -17,8 +17,11 @@
  * call here goes to /api/party with an `action` field (query string for
  * GET, JSON body for POST) instead of a path like /api/party/<room>/state.
  *
- * Public API is intentionally unchanged from the old peer-to-peer version
- * so party-ui.js didn't need to change at all.
+ * If a local profile exists (VidoraProfile), its name and small avatar
+ * image are used automatically for both hosting and joining, so nobody
+ * has to type their name every time — an explicit name passed to
+ * createRoom/joinRoom still wins if given (e.g. someone without a profile
+ * who typed one into the modal).
  * -----------------------------------------------------------
  */
 
@@ -40,7 +43,7 @@ const VidoraParty = (() => {
   }
 
   let role = null; // 'host' | 'guest' | null
-  let roomId = null, myToken = null, myName = null, myPassword = null;
+  let roomId = null, myToken = null, myName = null, myPassword = null, myAvatar = null;
   let mediaMeta = null, lastState = null, participants = [];
   let pollTimer = null;
 
@@ -53,6 +56,16 @@ const VidoraParty = (() => {
       mediaType: meta.mediaType, id: meta.id, title: meta.title,
       poster: meta.poster, season: meta.season, episode: meta.episode,
     };
+  }
+
+  // Falls back to the local profile's name/photo whenever an explicit
+  // value wasn't provided (e.g. the name field was hidden because a
+  // profile already exists).
+  function resolveIdentity(explicitName) {
+    const profile = window.VidoraProfile && VidoraProfile.getProfile();
+    const name = (explicitName && explicitName.trim()) || (profile && profile.name) || null;
+    const avatar = (profile && profile.image) || null;
+    return { name, avatar };
   }
 
   // Single flat endpoint. `action` goes in the query string for GET
@@ -121,11 +134,12 @@ const VidoraParty = (() => {
 
   async function createRoom(meta, password, hostName) {
     leaveRoom(); // guard against a leaked, still-live room if createRoom is called again
-    const data = await api("create", { method: "POST", body: { name: hostName, password, mediaMeta: meta } });
+    const { name, avatar } = resolveIdentity(hostName);
+    const data = await api("create", { method: "POST", body: { name: name || "Host", password, mediaMeta: meta, avatar } });
     role = "host"; roomId = data.roomId; myToken = data.hostToken;
-    myName = (hostName || "Host").slice(0, 20); myPassword = password;
+    myName = (name || "Host").slice(0, 20); myPassword = password; myAvatar = avatar;
     mediaMeta = cleanMeta(meta); lastState = null;
-    participants = [{ id: "host", name: myName, host: true }];
+    participants = [{ id: "host", name: myName, host: true, avatar: myAvatar }];
     emit("participants", participants);
     startPolling();
     return roomId;
@@ -133,9 +147,10 @@ const VidoraParty = (() => {
 
   async function joinRoom(code, password, name) {
     leaveRoom();
-    const data = await api("join", { method: "POST", body: { roomId: code, password, name } });
+    const identity = resolveIdentity(name);
+    const data = await api("join", { method: "POST", body: { roomId: code, password, name: identity.name || "Guest", avatar: identity.avatar } });
     role = "guest"; roomId = String(code).toLowerCase(); myToken = data.guestToken;
-    myName = (name || "Guest").slice(0, 20);
+    myName = (identity.name || "Guest").slice(0, 20); myAvatar = identity.avatar;
     mediaMeta = data.mediaMeta; lastState = data.lastState; participants = data.participants || [];
     emit("participants", participants);
     startPolling();
@@ -155,7 +170,7 @@ const VidoraParty = (() => {
         if (navigator.sendBeacon) navigator.sendBeacon("/api/party", payload);
       } catch (err) { /* best effort only */ }
     }
-    role = null; roomId = null; myToken = null; myName = null; myPassword = null;
+    role = null; roomId = null; myToken = null; myName = null; myPassword = null; myAvatar = null;
     mediaMeta = null; lastState = null; participants = [];
   }
 
@@ -237,6 +252,7 @@ const VidoraParty = (() => {
     getLastState: () => lastState,
     getParticipants: () => participants,
     getMyName: () => myName,
+    getMyAvatar: () => myAvatar,
     on, off,
   };
 })();

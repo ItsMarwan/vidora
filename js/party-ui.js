@@ -11,6 +11,10 @@
  * `currentContainer`/`currentCtx`, two module-level pointers that mount()
  * simply updates each time — so there's only ever one live listener per
  * event, no matter how many times the party UI has been mounted.
+ *
+ * When a local profile exists (VidoraProfile), the "your name" field is
+ * replaced with a small "Hosting/Joining as ⟨name⟩" chip showing the
+ * profile's name and photo — no re-typing a name every party.
  */
 
 const PartyUI = (() => {
@@ -57,14 +61,34 @@ const PartyUI = (() => {
     return `hsl(${AVATAR_HUES[h % AVATAR_HUES.length]}deg 58% 54%)`;
   }
 
+  // A participant's photo (if they have a profile) takes priority over
+  // the host crown / initials fallback.
+  function avatarInner(p) {
+    if (p.avatar) return `<img src="${p.avatar}" alt="" />`;
+    if (p.host) return VD.icon("crown", { size: 14 });
+    return initials(p.name);
+  }
+
   function participantListHTML(list) {
     if (!list.length) return `<p class="party-empty-note">Waiting for people to join…</p>`;
     return `<ul class="party-people">${list.map((p) => `
       <li class="party-person">
-        <span class="party-avatar" style="background:${avatarColor(p.id)}">${p.host ? VD.icon("crown", { size: 14 }) : initials(p.name)}</span>
+        <span class="party-avatar" style="background:${avatarColor(p.id)}">${avatarInner(p)}</span>
         <span class="party-person-name">${escName(p.name)}</span>
         ${p.host ? `<span class="party-person-tag">Host</span>` : ""}
       </li>`).join("")}</ul>`;
+  }
+
+  // Shown in the create/join modal in place of a name field once a local
+  // profile exists — the person's identity is already decided.
+  function identityChipHTML(verb) {
+    const profile = window.VidoraProfile && VidoraProfile.getProfile();
+    if (!profile) return "";
+    return `
+      <div class="party-profile-chip">
+        ${profile.image ? `<img src="${escName(profile.image)}" alt="" />` : VD.icon("user", { size: 16 })}
+        <span>${verb} as <strong>${escName(profile.name)}</strong></span>
+      </div>`;
   }
 
   function flashCopied(btn, label) {
@@ -201,19 +225,24 @@ const PartyUI = (() => {
 
   function openStartModal() {
     const ctx = currentCtx;
+    const hasProfile = window.VidoraProfile && VidoraProfile.hasProfile();
+    const nameFieldHTML = hasProfile
+      ? identityChipHTML("Hosting")
+      : `<label for="ptyName">Your name</label><input type="text" id="ptyName" placeholder="Host" maxlength="20" />`;
+
     VD.modal({
       title: "Start a Watch Party",
       sub: "Friends join with a link and a password. You stay in control of playback.",
       bodyHTML: `
-        <label for="ptyName">Your name</label>
-        <input type="text" id="ptyName" placeholder="Host" maxlength="20" />
+        ${nameFieldHTML}
         <label for="ptyPass">Room password</label>
         <input type="password" id="ptyPass" placeholder="e.g. movie-night" maxlength="24" autocomplete="off" />
       `,
       actions: [
         { id: "cancel", label: "Cancel", variant: "btn-ghost", onClick: (close) => close() },
         { id: "create", label: "Create room", variant: "btn-primary", onClick: async (close, backdrop) => {
-            const name = document.getElementById("ptyName").value.trim() || "Host";
+            const nameInput = document.getElementById("ptyName");
+            const name = nameInput ? nameInput.value.trim() || "Host" : undefined; // undefined → VidoraParty falls back to the profile name
             const pass = document.getElementById("ptyPass").value.trim();
             if (!pass) { VD.toast("Pick a password first."); return; }
             const createBtn = backdrop.querySelector('[data-action="create"]');
@@ -315,12 +344,16 @@ const PartyUI = (() => {
   // ---------------- join page (#/party/:roomId) ----------------
   function renderJoinPage(container, roomId) {
     container.innerHTML = `<div class="empty-state"><h3>Joining party…</h3></div>`;
+    const hasProfile = window.VidoraProfile && VidoraProfile.hasProfile();
+    const nameFieldHTML = hasProfile
+      ? identityChipHTML("Joining")
+      : `<label for="jName">Your name</label><input type="text" id="jName" placeholder="Guest" maxlength="20" />`;
+
     VD.modal({
       title: "Join Watch Party",
       sub: `Room ${roomId.toUpperCase()} — enter the password your host shared.`,
       bodyHTML: `
-        <label for="jName">Your name</label>
-        <input type="text" id="jName" placeholder="Guest" maxlength="20" />
+        ${nameFieldHTML}
         <label for="jPass">Password</label>
         <input type="password" id="jPass" placeholder="Room password" maxlength="24" autocomplete="off" />
         <div class="vd-field-error" id="jError" style="display:none;"></div>
@@ -328,7 +361,8 @@ const PartyUI = (() => {
       actions: [
         { id: "cancel", label: "Not now", variant: "btn-ghost", onClick: (close) => { close(); goTo("/"); } },
         { id: "join", label: "Join", variant: "btn-primary", onClick: async (close, backdrop) => {
-            const name = document.getElementById("jName").value.trim() || "Guest";
+            const nameInput = document.getElementById("jName");
+            const name = nameInput ? nameInput.value.trim() || "Guest" : undefined; // undefined → VidoraParty falls back to the profile name
             const pass = document.getElementById("jPass").value.trim();
             const errEl = document.getElementById("jError");
             errEl.style.display = "none";

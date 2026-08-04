@@ -40,6 +40,11 @@ const VD = (() => {
     sparkle: '<path d="M12 3.5c.5 3 1.9 4.4 4.9 4.9-3 .5-4.4 1.9-4.9 4.9-.5-3-1.9-4.4-4.9-4.9 3-.5 4.4-1.9 4.9-4.9Z"/><path d="M19 14.5c.3 1.6 1 2.3 2.6 2.6-1.6.3-2.3 1-2.6 2.6-.3-1.6-1-2.3-2.6-2.6 1.6-.3 2.3-1 2.6-2.6Z"/>',
     checkCircle: '<circle cx="12" cy="12" r="8.5"/><path d="m8.5 12.3 2.4 2.4 4.6-5"/>',
     clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3.2 2"/>',
+    user: '<circle cx="12" cy="8.2" r="3.6"/><path d="M4.4 20c1-4.2 4-6.4 7.6-6.4s6.6 2.2 7.6 6.4"/>',
+    download: '<path d="M12 3.5v11.2M8 10.7l4 4 4-4"/><path d="M4.5 16.5V19a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5v-2.5"/>',
+    upload: '<path d="M12 20.5V9.3M8 13l4-4 4 4"/><path d="M4.5 16.5V19a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5v-2.5"/>',
+    edit: '<path d="M4 20l.8-3.6L15.9 5.3a1.8 1.8 0 0 1 2.6 0l.2.2a1.8 1.8 0 0 1 0 2.6L7.6 19.2 4 20Z"/><path d="m14.3 6.9 2.8 2.8"/>',
+    trash: '<path d="M4.5 7h15"/><path d="M9 7V4.8A1.3 1.3 0 0 1 10.3 3.5h3.4A1.3 1.3 0 0 1 15 4.8V7"/><path d="M6.5 7 7.3 19a2 2 0 0 0 2 1.9h5.4a2 2 0 0 0 2-1.9L17.5 7"/>',
   };
 
   function icon(name, { size = 20, cls = "" } = {}) {
@@ -159,7 +164,7 @@ const VD = (() => {
     function focusable() {
       return [...dialog.querySelectorAll('button, input, select, textarea, a[href]')].filter((el) => !el.disabled && el.offsetParent !== null);
     }
-    const firstField = dialog.querySelector("input, select, textarea");
+    const firstField = dialog.querySelector('input:not([type="hidden"]):not([hidden]), select, textarea');
     (firstField || dialog.querySelector(".vd-modal-close")).focus();
 
     function close() {

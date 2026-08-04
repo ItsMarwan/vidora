@@ -577,6 +577,11 @@ function renderMyList() {
   wireBackButtons(app);
 }
 
+async function renderProfile(token) {
+  if (token !== routeToken) return;
+  ProfileUI.renderPage(app);
+}
+
 async function renderMovieDetail(id, token) {
   app.innerHTML = loadingState();
   const m = await VidoraData.movieDetails(id);
@@ -845,7 +850,7 @@ async function route() {
   stopHeroRotation();
   playPageTransition();
 
-  const routeName = parts.length === 0 ? "home" : (["movies", "series", "list"].includes(parts[0]) ? parts[0] : (parts[0] === "home" ? "home" : ""));
+  const routeName = parts.length === 0 ? "home" : (["movies", "series", "list", "profile"].includes(parts[0]) ? parts[0] : (parts[0] === "home" ? "home" : ""));
   setActiveNav(routeName);
 
   try {
@@ -853,6 +858,7 @@ async function route() {
     if (parts[0] === "movies") return renderGrid("movies", myToken);
     if (parts[0] === "series" && parts.length === 1) return renderGrid("series", myToken);
     if (parts[0] === "list") return renderMyList();
+    if (parts[0] === "profile") return renderProfile(myToken);
     if (parts[0] === "movie" && parts[1]) return renderMovieDetail(parts[1], myToken);
     if (parts[0] === "series" && parts[1]) return renderSeriesDetail(parts[1], parts[2], myToken);
     if (parts[0] === "watch" && parts[1] === "movie" && parts[2]) return renderWatchMovie(parts[2], myToken);
@@ -901,6 +907,47 @@ document.getElementById("mobileSurprise").addEventListener("click", () => {
   closeMobileMenu();
   goSurpriseMe();
 });
+
+// ---------------- chrome: profile button ----------------
+// Shows a generic person icon until a local profile exists, then swaps to
+// the profile's photo (or stays on the icon if no photo was set). Kept in
+// sync live via VidoraProfile.onChange so saving/editing/deleting a
+// profile updates the navbar immediately, without a route change.
+function updateNavProfileButton() {
+  const profile = VidoraProfile.getProfile();
+
+  const btn = document.getElementById("navProfile");
+  if (btn) {
+    if (profile && profile.image) {
+      btn.innerHTML = `<img id="navProfileContent" class="nav-profile-avatar" src="${profile.image}" alt="" />`;
+    } else {
+      btn.innerHTML = `<span id="navProfileContent" data-icon="user" data-icon-size="18" aria-hidden="true"></span>`;
+      VD.hydrateIcons(btn);
+    }
+    btn.title = profile ? profile.name : "Your profile";
+    btn.setAttribute("aria-label", profile ? `${profile.name} — your profile` : "Your profile");
+  }
+
+  // Mirror the same photo (or fall back to the icon) on the mobile menu's
+  // Profile row, so both entry points look consistent.
+  const mobileIcon = document.querySelector('.mobile-menu-link[data-route="profile"] .mobile-menu-link-icon');
+  if (mobileIcon) {
+    if (profile && profile.image) {
+      mobileIcon.innerHTML = `<img src="${profile.image}" alt="" />`;
+    } else {
+      mobileIcon.innerHTML = "";
+      mobileIcon.setAttribute("data-icon", "user");
+      mobileIcon.setAttribute("data-icon-size", "21");
+      VD.hydrateIcons(mobileIcon.parentElement);
+    }
+  }
+}
+const navProfileBtn = document.getElementById("navProfile");
+if (navProfileBtn) {
+  navProfileBtn.addEventListener("click", () => navigate("/profile"));
+  VidoraProfile.onChange(updateNavProfileButton);
+  updateNavProfileButton();
+}
 
 // ---------------- fullscreen mobile menu ----------------
 const navToggle = document.getElementById("navToggle");

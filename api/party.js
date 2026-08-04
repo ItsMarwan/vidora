@@ -4,6 +4,7 @@ import { assertOriginAllowed, getClientIp, rateLimit } from './_lib/security.js'
 import {
   ROOM_TTL_SECONDS,
   cleanMeta,
+  sanitizeAvatar,
   getRoomKey,
   hashPassword,
   publicParticipants,
@@ -22,6 +23,11 @@ import {
  * One flat file (no [...catch-all] segment) — the action is carried in
  * ?action=... (GET) or { action } in the JSON body (POST), never in the
  * URL path, so there's no dynamic route pattern for Vercel to resolve.
+ *
+ * Host and guests may optionally attach a small `avatar` (a resized data
+ * URL produced client-side by the local profile) alongside their name.
+ * It's sanitized/size-capped before ever being written to KV — see
+ * sanitizeAvatar() in _lib/party.js.
  * -----------------------------------------------------------
  */
 
@@ -51,7 +57,7 @@ export default async function handler(req, res) {
     const rl = await rateLimit(`party-create:${ip}`, 10, 60 * 10);
     if (!rl.allowed) return res.status(429).json({ error: 'Too many rooms created — try again later.' });
 
-    const { name, password, mediaMeta } = req.body || {};
+    const { name, password, mediaMeta, avatar } = req.body || {};
     if (!password || String(password).length < 3) {
       return res.status(400).json({ error: 'Choose a longer password.' });
     }
@@ -72,6 +78,7 @@ export default async function handler(req, res) {
     const room = {
       hostToken,
       hostName: String(name || 'Host').slice(0, 20),
+      hostAvatar: sanitizeAvatar(avatar),
       passwordHash: hashPassword(password),
       mediaMeta: cleanMeta(mediaMeta),
       lastState: null,
@@ -89,7 +96,7 @@ export default async function handler(req, res) {
     const rl = await rateLimit(`party-join:${ip}`, 20, 60 * 5);
     if (!rl.allowed) return res.status(429).json({ error: 'Too many attempts — slow down.' });
 
-    const { roomId, password, name } = req.body || {};
+    const { roomId, password, name, avatar } = req.body || {};
     if (!roomId || !password) return res.status(400).json({ error: 'Missing room code or password.' });
 
     const room = await getRoom(roomId);
@@ -100,7 +107,11 @@ export default async function handler(req, res) {
 
     const guestId = crypto.randomBytes(4).toString('hex');
     const guestToken = crypto.randomBytes(24).toString('hex');
-    room.guests[guestId] = { token: guestToken, name: String(name || 'Guest').slice(0, 20) };
+    room.guests[guestId] = {
+      token: guestToken,
+      name: String(name || 'Guest').slice(0, 20),
+      avatar: sanitizeAvatar(avatar),
+    };
     room.updatedAt = Date.now();
     await saveRoom(roomId, room);
 

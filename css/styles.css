@@ -297,8 +297,10 @@ body.no-scroll { overflow: hidden; height: 100dvh; }
   background: rgba(242,240,235,0.06);
   color: var(--text-primary);
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+  overflow: hidden; /* clips a profile photo to the circular button */
 }
 .nav-icon-btn:hover { background: rgba(232,184,75,0.14); border-color: var(--accent-gold-dim); transform: scale(1.06) rotate(-8deg); }
+.nav-profile-avatar { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
 
 /* ---------------- Fullscreen mobile menu ---------------- */
 /* A solid, fully opaque full-viewport panel — not a translucent dropdown
@@ -401,7 +403,9 @@ body.no-scroll { overflow: hidden; height: 100dvh; }
   display: flex; align-items: center; justify-content: center;
   background: rgba(232,184,75,0.12);
   color: var(--accent-gold);
+  overflow: hidden; /* clips a profile photo, when used here, to the circle */
 }
+.mobile-menu-link-icon img { width: 100%; height: 100%; object-fit: cover; }
 .mobile-menu-link-label { flex: 1; }
 .mobile-menu-link-chevron { flex: none; color: var(--text-muted); }
 .mobile-menu-link.active,
@@ -1119,7 +1123,9 @@ body.no-scroll { overflow: hidden; height: 100dvh; }
   display: flex; align-items: center; justify-content: center;
   color: #fff; font-size: 12px; font-weight: 700; font-family: var(--font-mono);
   box-shadow: 0 0 0 2px var(--bg-elevated);
+  overflow: hidden; /* clips a participant's photo to the circle */
 }
+.party-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .party-person-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; color: var(--text-primary); }
 .party-person-tag {
   flex: none; font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
@@ -1128,6 +1134,17 @@ body.no-scroll { overflow: hidden; height: 100dvh; }
 .party-empty-note { color: var(--text-muted); font-size: 13px; font-style: italic; margin: 0; }
 
 .party-actions { position: relative; display: flex; justify-content: flex-end; margin-top: 20px; }
+
+/* "Hosting/Joining as ⟨name⟩" chip shown in the create/join modal instead
+   of a name field once a local profile exists. */
+.party-profile-chip {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg-elevated); border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 18px;
+  font-size: 13.5px; color: var(--text-secondary);
+}
+.party-profile-chip img { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; flex: none; }
+.party-profile-chip strong { color: var(--text-primary); }
 
 @media (max-width: 560px) {
   .party-invite-row { flex-wrap: wrap; }
@@ -1186,7 +1203,7 @@ body.no-scroll { overflow: hidden; height: 100dvh; }
      .mobile-menu panel below — hide their desktop forms entirely here
      rather than toggling them, so there's only ever one mobile menu.
      lang-switch is desktop-only too, same reasoning as nav-links/nav-search. */
-  .nav-links, .nav-search, .lang-switch, #navSurprise { display: none; }
+  .nav-links, .nav-search, .lang-switch, #navSurprise, #navProfile { display: none; }
   .nav-toggle { display: flex; margin-left: auto; }
   .hero { min-height: 52vh; margin-top: -72px; }
   .hero-content { padding: 0 18px 40px; }
@@ -1200,4 +1217,120 @@ body.no-scroll { overflow: hidden; height: 100dvh; }
   .episode-thumb { width: 104px; }
   .episode-runtime { display: none; }
   .episode-play { grid-column: 3; justify-self: start; margin-top: 6px; }
+}
+
+/* ================= PROFILE PAGE ================= */
+
+.profile-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  padding: 26px;
+  margin-bottom: 26px;
+  max-width: 640px;
+}
+.profile-setup label,
+.profile-card label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 7px;
+}
+.profile-setup input[type="text"],
+.profile-card input[type="text"] {
+  width: 100%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-hairline);
+  color: var(--text-primary);
+  padding: 11px 14px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-body);
+  font-size: 14px;
+  margin-bottom: 18px;
+  transition: border-color 0.15s ease;
+}
+.profile-setup input[type="text"]:focus,
+.profile-card input[type="text"]:focus { border-color: var(--accent-gold-dim); }
+
+.profile-avatar-picker {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 22px;
+}
+.profile-avatar-preview {
+  width: 72px; height: 72px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-hairline);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-muted);
+  flex: none;
+}
+.profile-avatar-preview img { width: 100%; height: 100%; object-fit: cover; }
+.profile-photo-btn { display: inline-flex; }
+.profile-photo-hint { color: var(--text-muted); font-size: 12px; margin: 8px 0 0; }
+.profile-photo-remove { margin-left: 8px; color: #e8817a; }
+
+.profile-header { display: flex; align-items: center; gap: 18px; margin-bottom: 20px; }
+.profile-avatar-lg {
+  width: 76px; height: 76px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex: none;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-hairline);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-muted);
+}
+.profile-avatar-lg img { width: 100%; height: 100%; object-fit: cover; }
+.profile-header-text h2 { font-family: var(--font-display); font-style: italic; font-weight: 600; font-size: 24px; margin: 0 0 4px; }
+.profile-since { color: var(--text-muted); font-size: 12.5px; margin: 0; font-family: var(--font-mono); }
+.profile-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+.profile-section {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  padding: 26px;
+  margin-bottom: 22px;
+  max-width: 640px;
+}
+.profile-section h3 { font-family: var(--font-display); font-style: italic; font-weight: 600; font-size: 19px; margin: 0 0 8px; }
+.profile-section-desc { color: var(--text-secondary); font-size: 13.5px; line-height: 1.55; margin: 0 0 18px; }
+
+.profile-checklist { display: flex; flex-direction: column; gap: 10px; margin-bottom: 18px; }
+.profile-check-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-hairline);
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.profile-check-row.disabled { opacity: 0.5; cursor: not-allowed; }
+.profile-check-row input { accent-color: var(--accent-gold); width: 16px; height: 16px; }
+.profile-check-empty { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+
+.profile-file-input {
+  display: block;
+  width: 100%;
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-sm);
+  padding: 11px 14px;
+  margin-bottom: 14px;
+  font-family: var(--font-body);
+}
+
+@media (max-width: 640px) {
+  .profile-header { flex-wrap: wrap; }
+  .profile-avatar-picker { flex-wrap: wrap; }
 }

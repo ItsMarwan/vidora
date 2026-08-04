@@ -9,6 +9,13 @@ import kv from './kv.js';
 export const ROOM_TTL_SECONDS = 60 * 60 * 4;
 export const ROOM_PREFIX = 'party:';
 
+// Avatars are small, resized-client-side JPEG data URLs (see
+// VidoraProfile.fileToAvatar). This cap is generous headroom above what
+// that resizing actually produces — anything bigger is rejected rather
+// than written to KV, so a room can never balloon in size because of a
+// photo.
+const MAX_AVATAR_LENGTH = 60000;
+
 export function getRoomKey(roomId) {
   return `${ROOM_PREFIX}${String(roomId || '').toLowerCase()}`;
 }
@@ -29,10 +36,21 @@ export function cleanMeta(meta) {
   };
 }
 
+// Only ever accepts a data: image URL under the size cap — anything else
+// (a remote URL, arbitrary text, an oversized string) is dropped so a
+// malformed or hostile `avatar` field never reaches storage or gets
+// reflected back to other participants.
+export function sanitizeAvatar(avatar) {
+  if (typeof avatar !== 'string') return null;
+  if (!avatar.startsWith('data:image/')) return null;
+  if (avatar.length > MAX_AVATAR_LENGTH) return null;
+  return avatar;
+}
+
 export function publicParticipants(room) {
   return [
-    { id: 'host', name: room.hostName, host: true },
-    ...Object.entries(room.guests || {}).map(([id, g]) => ({ id, name: g.name, host: false })),
+    { id: 'host', name: room.hostName, host: true, avatar: room.hostAvatar || null },
+    ...Object.entries(room.guests || {}).map(([id, g]) => ({ id, name: g.name, host: false, avatar: g.avatar || null })),
   ];
 }
 

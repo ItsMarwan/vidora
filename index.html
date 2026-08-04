@@ -73,6 +73,9 @@
         <span class="lang-switch-label">AR</span>
       </button>
     </div> -->
+    <button type="button" class="nav-icon-btn nav-profile-btn" id="navProfile" title="Your profile" aria-label="Your profile">
+      <span id="navProfileContent" data-icon="user" data-icon-size="18" aria-hidden="true"></span>
+    </button>
     <button type="button" class="nav-icon-btn" id="navSurprise" title="Surprise me" aria-label="Surprise me - pick something random to watch">
       <span data-icon="dice" data-icon-size="18" aria-hidden="true"></span>
     </button>
@@ -118,9 +121,14 @@
       <span class="mobile-menu-link-label">My List</span>
       <span class="mobile-menu-link-chevron" data-icon="chevronRight" data-icon-size="16" aria-hidden="true"></span>
     </a>
+    <a href="/profile" data-route="profile" class="mobile-menu-link" style="--i:4">
+      <span class="mobile-menu-link-icon" data-icon="user" data-icon-size="21" aria-hidden="true"></span>
+      <span class="mobile-menu-link-label">Profile</span>
+      <span class="mobile-menu-link-chevron" data-icon="chevronRight" data-icon-size="16" aria-hidden="true"></span>
+    </a>
   </nav>
 
-  <button type="button" class="btn btn-primary mobile-menu-surprise" id="mobileSurprise" style="--i:4">
+  <button type="button" class="btn btn-primary mobile-menu-surprise" id="mobileSurprise" style="--i:5">
     <span data-icon="dice" data-icon-size="18" aria-hidden="true"></span> Surprise Me
   </button>
 </div>
@@ -133,12 +141,14 @@
 
 <script src="js/hash-redirect.js"></script>
 <script src="js/config.js"></script>
+<script src="js/profile.js"></script>
 <script src="js/i18n.js"></script>
 <script src="js/data.js"></script>
 <script src="js/player.js"></script>
 <script src="js/components.js"></script>
 <script src="js/party.js"></script>
 <script src="js/party-ui.js"></script>
+<script src="js/profile-ui.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

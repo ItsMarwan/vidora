@@ -20,6 +20,15 @@ const VidoraProfile = (() => {
   const PROFILE_KEY = "vidora_profile";
   const MY_LIST_KEY = "vidora_my_list";
   const CONTINUE_KEY = "vidora_continue_watching";
+  let inMemoryProfile = null;
+
+  function readStorage(key) {
+    try { return localStorage.getItem(key); } catch (err) { return null; }
+  }
+
+  function writeStorage(key, value) {
+    try { localStorage.setItem(key, value); return true; } catch (err) { return false; }
+  }
 
   // ---------------- change listeners ----------------
   // Lets the navbar avatar, Watch Party UI, etc. react immediately when the
@@ -37,12 +46,21 @@ const VidoraProfile = (() => {
 
   // ---------------- read / write ----------------
   function getProfile() {
-    try { return JSON.parse(localStorage.getItem(PROFILE_KEY)); } catch { return null; }
+    const raw = readStorage(PROFILE_KEY);
+    if (!raw) return inMemoryProfile;
+    try { return JSON.parse(raw); } catch (err) {
+      try { localStorage.removeItem(PROFILE_KEY); } catch (ignore) {}
+      return inMemoryProfile;
+    }
   }
   function hasProfile() { return !!getProfile(); }
 
   function saveProfile(profile) {
-    localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+    const json = JSON.stringify(profile);
+    if (!writeStorage(PROFILE_KEY, json)) {
+      console.warn("[Profile] localStorage write failed; preserving profile in memory for this session.");
+    }
+    inMemoryProfile = profile;
     emitChange();
     return profile;
   }
@@ -69,7 +87,8 @@ const VidoraProfile = (() => {
   }
 
   function deleteProfile() {
-    localStorage.removeItem(PROFILE_KEY);
+    try { localStorage.removeItem(PROFILE_KEY); } catch (err) {}
+    inMemoryProfile = null;
     emitChange();
   }
 

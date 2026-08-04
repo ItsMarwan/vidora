@@ -2,7 +2,17 @@
   "cleanUrls": true,
   "trailingSlash": false,
   "rewrites": [
-    { "source": "/((?!api/|css/|js/|favicon.ico|og-default.png).*)", "destination": "/index.html" }
+    { "source": "/movies", "destination": "/index.html" },
+    { "source": "/series", "destination": "/index.html" },
+    { "source": "/list", "destination": "/index.html" },
+    { "source": "/profile", "destination": "/index.html" },
+    { "source": "/movie/:id", "destination": "/index.html" },
+    { "source": "/series/:id", "destination": "/index.html" },
+    { "source": "/series/:id/:season", "destination": "/index.html" },
+    { "source": "/watch/movie/:id", "destination": "/index.html" },
+    { "source": "/watch/series/:id/:season/:episode", "destination": "/index.html" },
+    { "source": "/party/:roomId", "destination": "/index.html" },
+    { "source": "/search/:query", "destination": "/index.html" }
   ],
   "headers": [
     {

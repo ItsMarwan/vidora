@@ -12,7 +12,8 @@
     { "source": "/watch/movie/:id", "destination": "/index.html" },
     { "source": "/watch/series/:id/:season/:episode", "destination": "/index.html" },
     { "source": "/party/:roomId", "destination": "/index.html" },
-    { "source": "/search/:query", "destination": "/index.html" }
+    { "source": "/search/:query", "destination": "/index.html" },
+    { "source": "/(?!api/|.*\\..*$)(.*)", "destination": "/index.html" }
   ],
   "headers": [
     {

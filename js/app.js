@@ -481,8 +481,8 @@ function loadingState() {
   return `<div class="empty-state"><div class="vd-spinner" aria-hidden="true">${VD.icon("sparkle", { size: 30 })}</div><h3>Loading…</h3></div>`;
 }
 
-function emptyState(title, sub) {
-  return `<div class="empty-state"><div class="empty-state-icon" aria-hidden="true">${VD.icon("search", { size: 28 })}</div><h3>${title}</h3><p>${sub}</p></div>`;
+function emptyState(title, sub, buttonLabel) {
+  return `<div class="empty-state"><div class="empty-state-icon" aria-hidden="true">${VD.icon("search", { size: 28 })}</div><h3>${title}</h3><p>${sub}</p>${buttonLabel ? `<button class="btn btn-primary empty-state-btn" type="button" onclick="window.vidoraNavigate('/')">${buttonLabel}</button>` : ""}</div>`;
 }
 
 // ---------------- pages ----------------
@@ -722,6 +722,7 @@ async function renderWatchMovie(id, token) {
   const m = await VidoraData.movieDetails(id);
   if (token !== routeToken) return;
   if (!m) { app.innerHTML = emptyState("Not found", "That title isn't available."); return; }
+  document.title = `${m.title} • Vidora`;
   const partyState = VidoraParty.isGuest() && VidoraParty.getMediaMeta() &&
     String(VidoraParty.getMediaMeta().id) === String(id) && VidoraParty.getMediaMeta().mediaType === "movie"
     ? VidoraParty.getLastState() : null;
@@ -763,6 +764,7 @@ async function renderWatchSeries(id, season, episode, token) {
   const [s, se] = await Promise.all([VidoraData.showDetails(id), VidoraData.seasonDetails(id, season)]);
   if (token !== routeToken) return;
   if (!s) { app.innerHTML = emptyState("Not found", "That title isn't available."); return; }
+  document.title = `S${season}E${episode} • ${s.title} • Vidora`;
   const ep = se.episodes.find((e) => e.episode_number === Number(episode));
   const partyState = VidoraParty.isGuest() && VidoraParty.getMediaMeta() &&
     String(VidoraParty.getMediaMeta().id) === String(id) && VidoraParty.getMediaMeta().mediaType === "tv" &&
@@ -865,7 +867,7 @@ async function route() {
     if (parts[0] === "watch" && parts[1] === "series" && parts[2] && parts[3] && parts[4]) return renderWatchSeries(parts[2], parts[3], parts[4], myToken);
     if (parts[0] === "party" && parts[1]) return PartyUI.renderJoinPage(app, parts[1]);
     if (parts[0] === "search" && parts[1]) return renderSearch(decodeURIComponent(parts[1]), myToken);
-    app.innerHTML = emptyState("Page not found", "Let's get you back home.");
+    app.innerHTML = emptyState("Page not found", "Let's get you back home.", "Go home");
   } catch (err) {
     console.error(err);
     app.innerHTML = emptyState("Something went wrong", "Please try again in a moment.");

@@ -1271,7 +1271,13 @@ body.no-scroll { overflow: hidden; height: 100dvh; }
   color: var(--text-muted);
   flex: none;
 }
-.profile-avatar-preview img { width: 100%; height: 100%; object-fit: cover; }
+.profile-avatar-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center center;
+}
 .profile-photo-btn { display: inline-flex; }
 .profile-photo-hint { color: var(--text-muted); font-size: 12px; margin: 8px 0 0; }
 .profile-photo-remove { margin-left: 8px; color: #e8817a; }
@@ -1287,7 +1293,13 @@ body.no-scroll { overflow: hidden; height: 100dvh; }
   display: flex; align-items: center; justify-content: center;
   color: var(--text-muted);
 }
-.profile-avatar-lg img { width: 100%; height: 100%; object-fit: cover; }
+.profile-avatar-lg img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center center;
+}
 .profile-header-text h2 { font-family: var(--font-display); font-style: italic; font-weight: 600; font-size: 24px; margin: 0 0 4px; }
 .profile-since { color: var(--text-muted); font-size: 12.5px; margin: 0; font-family: var(--font-mono); }
 .profile-actions { display: flex; gap: 12px; flex-wrap: wrap; }

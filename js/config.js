@@ -9,6 +9,12 @@
 const VIDORA_CONFIG = {
   API_BASE: "/api",
   VIDKING_BASE_URL: "https://www.vidking.net/embed",
+  // Arabic-language player (see js/i18n.js) — used instead of Vidking
+  // whenever VidoraLang.isArabic() is true. Per URPlayer's documented
+  // API, embed URLs are /embed/movie/{tmdb_id} and
+  // /embed/tv/{tmdb_id}/{season}/{episode} — no query params documented,
+  // so js/player.js doesn't attach the Vidking-specific ones here.
+  URPLAYER_BASE_URL: "https://urplayer.net/embed",
   PLAYER_COLOR: "e8b84b",
   PLAYER_AUTOPLAY: true,
   PLAYER_NEXT_EPISODE: true,

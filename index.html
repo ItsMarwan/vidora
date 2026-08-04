@@ -24,7 +24,7 @@
 <meta name="twitter:description" content="Vidora - a clean, modern home for movies and series." />
 <meta name="twitter:image" content="/og-default.png" />
 
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; img-src 'self' data: https:; frame-src https://www.vidking.net https://www.youtube.com; form-action 'self'; object-src 'none'; base-uri 'self';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; img-src 'self' data: https:; frame-src https://www.vidking.net https://urplayer.net https://www.youtube.com; form-action 'self'; object-src 'none'; base-uri 'self';">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2222%22 fill=%22%230a0a0c%22/><text x=%2250%22 y=%2266%22 font-size=%2258%22 text-anchor=%22middle%22 fill=%22%23e8b84b%22 font-family=%22Georgia%22 font-style=%22italic%22>V</text></svg>">
 <link rel="stylesheet" href="css/styles.css" />
 </head>
@@ -46,6 +46,32 @@
       <label for="searchInput" class="sr-only">Search movies &amp; series</label>
       <span class="nav-search-icon" data-icon="search" data-icon-size="16" aria-hidden="true"></span>
       <input type="search" id="searchInput" placeholder="Search movies &amp; series…" enterkeyhint="search" />
+    </div>
+    <div class="lang-switch" id="langSwitch" role="group" aria-label="Player language">
+      <button type="button" class="lang-switch-btn" data-lang-btn="en" aria-pressed="true" aria-label="English — Vidking player" title="English (Vidking player)">
+        <svg class="lang-flag" viewBox="0 0 24 16" width="20" height="14" aria-hidden="true">
+          <rect width="24" height="16" fill="#b22234"/>
+          <g fill="#fff">
+            <rect y="1.23" width="24" height="1.23"/>
+            <rect y="3.69" width="24" height="1.23"/>
+            <rect y="6.15" width="24" height="1.23"/>
+            <rect y="8.62" width="24" height="1.23"/>
+            <rect y="11.08" width="24" height="1.23"/>
+            <rect y="13.54" width="24" height="1.23"/>
+          </g>
+          <rect width="10" height="8.6" fill="#3c3b6e"/>
+        </svg>
+        <span class="lang-switch-label">EN</span>
+      </button>
+      <button type="button" class="lang-switch-btn" data-lang-btn="ar" aria-pressed="false" aria-label="Arabic — URPlayer" title="العربية (مشغل URPlayer)">
+        <svg class="lang-flag" viewBox="0 0 24 16" width="20" height="14" aria-hidden="true">
+          <rect width="24" height="16" fill="#ce1126"/>
+          <rect y="5.33" width="24" height="5.33" fill="#fff"/>
+          <rect y="10.66" width="24" height="5.34" fill="#000"/>
+          <circle cx="12" cy="8" r="1.6" fill="#c09a3e"/>
+        </svg>
+        <span class="lang-switch-label">AR</span>
+      </button>
     </div>
     <button type="button" class="nav-icon-btn" id="navSurprise" title="Surprise me" aria-label="Surprise me - pick something random to watch">
       <span data-icon="dice" data-icon-size="18" aria-hidden="true"></span>
@@ -102,11 +128,12 @@
 <main id="app" tabindex="-1"></main>
 
 <footer class="footer">
-  Vidora · playback powered by the Vidking embed API
+  Vidora · playback powered by the Vidking &amp; URPlayer embed APIs
 </footer>
 
 <script src="js/hash-redirect.js"></script>
 <script src="js/config.js"></script>
+<script src="js/i18n.js"></script>
 <script src="js/data.js"></script>
 <script src="js/player.js"></script>
 <script src="js/components.js"></script>

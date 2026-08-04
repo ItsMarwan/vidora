@@ -205,6 +205,45 @@ button { font-family: inherit; cursor: pointer; }
 .nav-search input:focus { width: 280px; border-color: var(--accent-gold-dim); }
 .nav-search input::placeholder { color: var(--text-muted); }
 
+/* ---------------- Language / player switch (EN Vidking · AR URPlayer) ---------------- */
+/* Desktop-only, sits between search and the surprise-me dice — the
+   fullscreen mobile menu isn't touched here, matching nav-links/nav-search
+   which are also desktop-only (see the 720px breakpoint at the bottom). */
+.lang-switch {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-hairline);
+  border-radius: 999px;
+  padding: 4px;
+}
+.lang-switch-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  padding: 6px 11px 6px 8px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.lang-switch-btn:hover { background: rgba(242,240,235,0.08); color: var(--text-primary); }
+.lang-switch-btn.active { background: var(--accent-gold); color: #17140b; }
+.lang-flag {
+  display: block;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.3);
+  flex-shrink: 0;
+}
+.lang-switch-btn.active .lang-flag { box-shadow: 0 0 0 1px rgba(23,20,11,0.4); }
+
 /* ---------------- Icon library ---------------- */
 .vd-icon { display: inline-block; vertical-align: -3px; flex-shrink: 0; }
 
@@ -1145,8 +1184,9 @@ body.no-scroll { overflow: hidden; height: 100dvh; }
   .navbar-inner { padding: 16px 18px; gap: 12px; }
   /* The old inline dropdown/search are replaced by the fullscreen
      .mobile-menu panel below — hide their desktop forms entirely here
-     rather than toggling them, so there's only ever one mobile menu. */
-  .nav-links, .nav-search, #navSurprise { display: none; }
+     rather than toggling them, so there's only ever one mobile menu.
+     lang-switch is desktop-only too, same reasoning as nav-links/nav-search. */
+  .nav-links, .nav-search, .lang-switch, #navSurprise { display: none; }
   .nav-toggle { display: flex; margin-left: auto; }
   .hero { min-height: 52vh; margin-top: -72px; }
   .hero-content { padding: 0 18px 40px; }

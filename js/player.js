@@ -1,8 +1,19 @@
 /**
  * VIDORA — PLAYER MODULE
- * Builds Vidking iframe URLs per their documented API and listens
- * for PLAYER_EVENT postMessages to keep a "Continue Watching" shelf
- * in localStorage, isolated under its own key.
+ * Builds player iframe URLs and listens for PLAYER_EVENT postMessages to
+ * keep a "Continue Watching" shelf in localStorage, isolated under its
+ * own key.
+ *
+ * Two embed providers are supported, chosen per VidoraLang (js/i18n.js):
+ *   - Vidking (English / default) — documented query params for color,
+ *     autoplay, progress, next-episode and episode-selector.
+ *   - URPlayer (Arabic) — https://urplayer.net/#api. Its documented API
+ *     is just /embed/movie/{tmdb_id} and
+ *     /embed/tv/{tmdb_id}/{season}/{episode} with no query params, so
+ *     those builders skip all the Vidking-specific options.
+ * Continue Watching / progress tracking is provider-agnostic — it only
+ * cares about the postMessage PLAYER_EVENT payload, which both providers
+ * are expected to emit the same way.
  */
 
 const VidoraPlayer = (() => {
@@ -24,7 +35,16 @@ const VidoraPlayer = (() => {
     return `${url}${sep}_=${Date.now().toString(36)}`;
   }
 
+  function useArabicPlayer() {
+    return typeof VidoraLang !== "undefined" && VidoraLang.isArabic();
+  }
+
   function movieUrl(tmdbId, progressSeconds = 0, autoplay = VIDORA_CONFIG.PLAYER_AUTOPLAY) {
+    if (useArabicPlayer()) {
+      // URPlayer's documented movie embed takes only the TMDB id — no
+      // progress/autoplay query params to pass through.
+      return cacheBust(`${VIDORA_CONFIG.URPLAYER_BASE_URL}/movie/${tmdbId}`);
+    }
     const p = new URLSearchParams({
       color: VIDORA_CONFIG.PLAYER_COLOR,
       autoPlay: String(autoplay),
@@ -34,6 +54,10 @@ const VidoraPlayer = (() => {
   }
 
   function tvUrl(tmdbId, season, episode, progressSeconds = 0, autoplay = VIDORA_CONFIG.PLAYER_AUTOPLAY) {
+    if (useArabicPlayer()) {
+      // URPlayer's documented TV embed: /embed/tv/{tmdb_id}/{season}/{episode}
+      return cacheBust(`${VIDORA_CONFIG.URPLAYER_BASE_URL}/tv/${tmdbId}/${season}/${episode}`);
+    }
     const p = new URLSearchParams({
       color: VIDORA_CONFIG.PLAYER_COLOR,
       autoPlay: String(autoplay),

@@ -1,23 +1,37 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>404 • Vidora</title>
-        <link rel="stylesheet" href="css/styles.css" />
-        <style>
-            body { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 24px; background: #07070b; color: #f2f2f5; }
-            .notfound { max-width: 560px; width: 100%; text-align: center; }
-            .notfound h1 { font-size: 4rem; margin: 0 0 16px; }
-            .notfound p { color: #b8b8c7; margin: 0 0 24px; }
-            .notfound a { display: inline-flex; align-items: center; justify-content: center; padding: 12px 20px; border-radius: 999px; background: #f4c54f; color: #0b0b0d; font-weight: 600; text-decoration: none; }
-        </style>
-    </head>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Redirecting...</title>
+
+    <script>
+        (function () {
+            const path =
+                location.pathname +
+                location.search +
+                location.hash;
+
+            sessionStorage.setItem("vidora_redirect_path", path);
+
+            location.replace("/");
+        })();
+    </script>
+
+    <style>
+        html, body {
+            margin: 0;
+            height: 100%;
+            background: #09090b;
+            color: #e8b84b;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: Manrope, sans-serif;
+        }
+    </style>
+</head>
     <body>
-        <div class="notfound">
-            <h1>404</h1>
-            <p>Page not found — but the app is still here. Click below to go back to Vidora.</p>
-            <a href="/">Go to Vidora home</a>
-        </div>
+        Redirecting...
     </body>
 </html>

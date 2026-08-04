@@ -8,6 +8,13 @@
  */
 
 const app = document.getElementById("app");
+const redirectedPath = sessionStorage.getItem("vidora_redirect_path");
+
+if (redirectedPath) {
+    sessionStorage.removeItem("vidora_redirect_path");
+
+    history.replaceState({}, "", redirectedPath);
+}
 
 // ---------------- global redirect guard + internal link routing ----------------
 (() => {
@@ -722,7 +729,7 @@ async function renderWatchMovie(id, token) {
   const m = await VidoraData.movieDetails(id);
   if (token !== routeToken) return;
   if (!m) { app.innerHTML = emptyState("Not found", "That title isn't available."); return; }
-  document.title = `${m.title} • Vidora`;
+  document.title = `${m.title} - Vidora`;
   const partyState = VidoraParty.isGuest() && VidoraParty.getMediaMeta() &&
     String(VidoraParty.getMediaMeta().id) === String(id) && VidoraParty.getMediaMeta().mediaType === "movie"
     ? VidoraParty.getLastState() : null;
@@ -764,7 +771,7 @@ async function renderWatchSeries(id, season, episode, token) {
   const [s, se] = await Promise.all([VidoraData.showDetails(id), VidoraData.seasonDetails(id, season)]);
   if (token !== routeToken) return;
   if (!s) { app.innerHTML = emptyState("Not found", "That title isn't available."); return; }
-  document.title = `S${season}E${episode} • ${s.title} • Vidora`;
+  document.title = `S${season}E${episode} - ${s.title} - Vidora`;
   const ep = se.episodes.find((e) => e.episode_number === Number(episode));
   const partyState = VidoraParty.isGuest() && VidoraParty.getMediaMeta() &&
     String(VidoraParty.getMediaMeta().id) === String(id) && VidoraParty.getMediaMeta().mediaType === "tv" &&
@@ -829,6 +836,57 @@ async function renderSearch(query, token) {
 
 // ---------------- router ----------------
 
+const routeDefinitions = [
+  { pattern: "/watch/series/:id/:season/:episode", nav: "", render: ({ id, season, episode }, token) => renderWatchSeries(id, season, episode, token) },
+  { pattern: "/watch/movie/:id", nav: "", render: ({ id }, token) => renderWatchMovie(id, token) },
+  { pattern: "/series/:id/:season", nav: "series", render: ({ id, season }, token) => renderSeriesDetail(id, season, token) },
+  { pattern: "/series/:id", nav: "series", render: ({ id }, token) => renderSeriesDetail(id, null, token) },
+  { pattern: "/movie/:id", nav: "", render: ({ id }, token) => renderMovieDetail(id, token) },
+  { pattern: "/search/:query", nav: "", render: ({ query }, token) => renderSearch(query, token) },
+  { pattern: "/party/:id", nav: "", render: ({ id }) => PartyUI.renderJoinPage(app, id) },
+  { pattern: "/series", nav: "series", render: (_params, token) => renderGrid("series", token) },
+  { pattern: "/movies", nav: "movies", render: (_params, token) => renderGrid("movies", token) },
+  { pattern: "/list", nav: "list", render: () => renderMyList() },
+  { pattern: "/profile", nav: "profile", render: (_params, token) => renderProfile(token) },
+  { pattern: "/home", nav: "home", render: (_params, token) => renderHome(token) },
+  { pattern: "/", nav: "home", render: (_params, token) => renderHome(token) },
+];
+
+function normalizePath(path) {
+  const raw = path instanceof URL ? path.pathname : String(path || "");
+  const urlPath = raw.startsWith("/") ? raw : new URL(raw, location.href).pathname;
+  const collapsed = urlPath.replace(/\/\/+/g, "/").replace(/\/+$/, "");
+  return collapsed === "" ? "/" : collapsed;
+}
+
+function compileRoute(route) {
+  const pattern = normalizePath(route.pattern);
+  const keys = [];
+  const regexSource = pattern === "/"
+    ? "/"
+    : pattern.replace(/:([^/]+)/g, (_, key) => {
+        keys.push(key);
+        return "([^/]+)";
+      });
+  return { ...route, pattern, keys, regex: new RegExp(`^${regexSource}$`) };
+}
+
+const routeTable = routeDefinitions.map(compileRoute);
+
+function matchRoute(pathname) {
+  const normalized = normalizePath(pathname);
+  for (const route of routeTable) {
+    const match = normalized.match(route.regex);
+    if (!match) continue;
+    const params = {};
+    route.keys.forEach((key, index) => {
+      params[key] = decodeURIComponent(match[index + 1]);
+    });
+    return { route, params };
+  }
+  return null;
+}
+
 function setActiveNav(routeName) {
   document.querySelectorAll(".nav-links a, .mobile-menu-links a").forEach((a) => {
     const isActive = a.dataset.route === routeName;
@@ -846,28 +904,20 @@ function playPageTransition() {
 
 async function route() {
   const myToken = ++routeToken;
-  const parts = location.pathname.replace(/^\//, "").split("/").filter(Boolean);
   window.scrollTo(0, 0);
   closeMobileMenu();
   stopHeroRotation();
   playPageTransition();
 
-  const routeName = parts.length === 0 ? "home" : (["movies", "series", "list", "profile"].includes(parts[0]) ? parts[0] : (parts[0] === "home" ? "home" : ""));
-  setActiveNav(routeName);
+  const matched = matchRoute(location.pathname);
+  setActiveNav(matched ? matched.route.nav : "");
 
   try {
-    if (parts.length === 0 || parts[0] === "home") return renderHome(myToken);
-    if (parts[0] === "movies") return renderGrid("movies", myToken);
-    if (parts[0] === "series" && parts.length === 1) return renderGrid("series", myToken);
-    if (parts[0] === "list") return renderMyList();
-    if (parts[0] === "profile") return renderProfile(myToken);
-    if (parts[0] === "movie" && parts[1]) return renderMovieDetail(parts[1], myToken);
-    if (parts[0] === "series" && parts[1]) return renderSeriesDetail(parts[1], parts[2], myToken);
-    if (parts[0] === "watch" && parts[1] === "movie" && parts[2]) return renderWatchMovie(parts[2], myToken);
-    if (parts[0] === "watch" && parts[1] === "series" && parts[2] && parts[3] && parts[4]) return renderWatchSeries(parts[2], parts[3], parts[4], myToken);
-    if (parts[0] === "party" && parts[1]) return PartyUI.renderJoinPage(app, parts[1]);
-    if (parts[0] === "search" && parts[1]) return renderSearch(decodeURIComponent(parts[1]), myToken);
-    app.innerHTML = emptyState("Page not found", "Let's get you back home.", "Go home");
+    if (!matched) {
+      app.innerHTML = emptyState("Page not found", "Let's get you back home.", "Go home");
+      return;
+    }
+    await matched.route.render(matched.params, myToken);
   } catch (err) {
     console.error(err);
     app.innerHTML = emptyState("Something went wrong", "Please try again in a moment.");

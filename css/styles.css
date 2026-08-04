@@ -300,7 +300,7 @@ body.no-scroll { overflow: hidden; height: 100dvh; }
   overflow: hidden; /* clips a profile photo to the circular button */
 }
 .nav-icon-btn:hover { background: rgba(232,184,75,0.14); border-color: var(--accent-gold-dim); transform: scale(1.06) rotate(-8deg); }
-.nav-profile-avatar { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
+.nav-profile-avatar { width: 100%; object-fit: cover; border-radius: 50%; display: block; }
 
 /* ---------------- Fullscreen mobile menu ---------------- */
 /* A solid, fully opaque full-viewport panel — not a translucent dropdown

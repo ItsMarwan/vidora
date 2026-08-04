@@ -1,34 +1,47 @@
 {
   "cleanUrls": true,
   "trailingSlash": false,
+
   "rewrites": [
-    { "source": "/movies", "destination": "/index.html" },
-    { "source": "/series", "destination": "/index.html" },
-    { "source": "/list", "destination": "/index.html" },
-    { "source": "/profile", "destination": "/index.html" },
-    { "source": "/movie/:id", "destination": "/index.html" },
-    { "source": "/series/:id", "destination": "/index.html" },
-    { "source": "/series/:id/:season", "destination": "/index.html" },
-    { "source": "/watch/movie/:id", "destination": "/index.html" },
-    { "source": "/watch/series/:id/:season/:episode", "destination": "/index.html" },
-    { "source": "/party/:roomId", "destination": "/index.html" },
-    { "source": "/search/:query", "destination": "/index.html" },
-    { "source": "/(?!api/|.*\\..*$)(.*)", "destination": "/index.html" }
+    {
+      "source": "/api/:path*",
+      "destination": "/api/:path*"
+    },
+    {
+      "source": "/:path*",
+      "destination": "/index.html"
+    }
   ],
+
   "headers": [
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "X-Frame-Options", "value": "SAMEORIGIN" },
-        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
-        { "key": "Permissions-Policy", "value": "geolocation=(), microphone=(), camera=()" }
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "SAMEORIGIN"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "geolocation=(), microphone=(), camera=()"
+        }
       ]
     },
     {
       "source": "/api/(.*)",
       "headers": [
-        { "key": "Cache-Control", "value": "no-store" }
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        }
       ]
     }
   ]

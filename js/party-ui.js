@@ -329,12 +329,17 @@ const PartyUI = (() => {
     const drift = Math.abs(time - lastAppliedState.time);
     const isCommand = state.event === "play" || state.event === "pause" || state.event === "seeked";
 
-    // Heartbeats ("timeupdate") are just a drift safety net, not a command —
-    // only let one through if drift has grown large enough to be worth a
-    // reload (every reload risks a blocked-autoplay prompt).
-    if (!isCommand && drift < 8) return;
-    // Skip near-duplicate updates so we don't reload the iframe for nothing.
-    if (state.event === lastAppliedState.event && state.event !== "seeked" && drift < 2) return;
+    // Max allowed drift before we force a resync. Commands (play/pause/seek)
+    // always apply immediately regardless of drift; heartbeats ("timeupdate",
+    // sent every 2 minutes per the host's HEARTBEAT_MS) are just a periodic
+    // safety-net check — only worth a reload once drift exceeds this.
+    const DRIFT_TOLERANCE_SEC = 1;
+    if (!isCommand && drift < DRIFT_TOLERANCE_SEC) return;
+    // Skip near-duplicate updates so we don't reload the iframe for nothing
+    // (e.g. the same "play" arriving twice in a row with ~identical time).
+    // Kept at the same tolerance so this can't silently widen the effective
+    // drift window above DRIFT_TOLERANCE_SEC.
+    if (state.event === lastAppliedState.event && state.event !== "seeked" && drift < DRIFT_TOLERANCE_SEC) return;
 
     lastAppliedState = { event: state.event, time };
     const autoplay = state.event !== "pause";

@@ -164,14 +164,30 @@ const VidoraPlayer = (() => {
       return;
     }
     if (typeof e.currentTime !== "number" || !Number.isFinite(e.currentTime) || e.currentTime < 0) return;
-    if (typeof e.duration !== "number" || !Number.isFinite(e.duration) || e.duration <= 0) return;
 
-    lastKnown = { currentTime: e.currentTime, duration: e.duration };
+    // Duration isn't always known yet — some providers fire the very
+    // first "play" event (e.g. the moment a Watch Party host presses play
+    // on a freshly-loaded title) before the video's metadata/duration has
+    // finished loading, so duration comes through as 0/NaN at that
+    // instant. This used to make the whole handler bail out early and
+    // never call onUpdateCb at all for that event — which meant the
+    // host's very first "play" never reached Watch Party's sync, so
+    // guests stayed stuck on a stopped screen even though the host was
+    // actually playing (pause worked fine because by then duration had
+    // already loaded). A missing duration should only block the
+    // "Continue Watching" checkpoint below (which genuinely needs a real
+    // duration to compute a progress fraction) — it should never block
+    // the live event notification itself.
+    const hasValidDuration = typeof e.duration === "number" && Number.isFinite(e.duration) && e.duration > 0;
+    if (hasValidDuration) lastKnown = { currentTime: e.currentTime, duration: e.duration };
 
     // Notify listeners (Watch Party sync, etc.) immediately for every event,
-    // including play/pause/seeked — this must never be gated on a localStorage
-    // write, or pausing/seeking can feel like it's not responding.
+    // including play/pause/seeked — this must never be gated on duration
+    // being loaded yet, or on a localStorage write, or pausing/seeking (and,
+    // previously, that very first play) can feel like it's not responding.
     if (onUpdateCb) onUpdateCb(e);
+
+    if (!hasValidDuration) return; // nothing to checkpoint locally without a real duration yet
 
     // The localStorage write ("Continue Watching" resume point) is
     // checkpointed every ~2 minutes (VIDORA_CONFIG.PROGRESS_SAVE_INTERVAL_MS)

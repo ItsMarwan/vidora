@@ -196,7 +196,12 @@ const VidoraParty = (() => {
   // fetch() to our own API instead of a WebRTC data channel.
   function createHostSync() {
     const PAUSE_GRACE_MS = 550;
-    const HEARTBEAT_MS = 15000;
+    // Periodic sync-check anchor: even while nothing changes (host just
+    // keeps playing), push a "timeupdate" every 2 minutes so guests have a
+    // fresh reference point to check their own drift against — this is
+    // what makes the resync check in party-ui.js actually recurring instead
+    // of only firing on play/pause/seek.
+    const HEARTBEAT_MS = 120000;
     let lastBroadcast = 0;
     let isPlaying = false;
     let pendingPauseTimer = null;

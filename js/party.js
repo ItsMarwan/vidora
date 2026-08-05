@@ -187,6 +187,22 @@ const VidoraParty = (() => {
       .catch((err) => console.warn("[Watch Party] failed to push state:", err));
   }
 
+  // Reports THIS participant's own live position (host or guest — whoever's
+  // browser this is) so everyone else's party list can show it. Purely
+  // informational: never touches lastState, never drives a reload. Best
+  // effort — a missed ping just leaves a stale timestamp next to this
+  // person's name for a few seconds, nothing else depends on it.
+  const PRESENCE_INTERVAL_MS = 5000;
+  let lastPresence = 0;
+  function reportPresence(time, playing) {
+    if (!roomId || !myToken) return;
+    const now = Date.now();
+    if (now - lastPresence < PRESENCE_INTERVAL_MS) return;
+    lastPresence = now;
+    api("presence", { method: "POST", body: { roomId, token: myToken, time, playing } })
+      .catch(() => {});
+  }
+
   async function updateMedia(meta) {
     if (role !== "host") return;
     mediaMeta = cleanMeta(meta);
@@ -202,6 +218,11 @@ const VidoraParty = (() => {
   // fetch() to our own API instead of a WebRTC data channel.
   function createHostSync() {
     const PAUSE_GRACE_MS = 550;
+    // Collapses a scrub-drag (a player can fire several "seeked" events in
+    // quick succession while someone drags the position bar) into ONE
+    // broadcast of the FINAL position, instead of pushing a fresh state —
+    // and triggering a fresh guest reload — for every intermediate seek.
+    const SEEK_GRACE_MS = 500;
     // Periodic sync-check anchor: even while nothing changes (host just
     // keeps playing), push a "timeupdate" every 2 minutes so guests have a
     // fresh reference point to check their own drift against — this is
@@ -211,9 +232,13 @@ const VidoraParty = (() => {
     let lastBroadcast = 0;
     let isPlaying = false;
     let pendingPauseTimer = null;
+    let pendingSeekTimer = null;
 
-    function clearPending() {
+    function clearPendingPause() {
       if (pendingPauseTimer) { clearTimeout(pendingPauseTimer); pendingPauseTimer = null; }
+    }
+    function clearPendingSeek() {
+      if (pendingSeekTimer) { clearTimeout(pendingSeekTimer); pendingSeekTimer = null; }
     }
     function send(evt) {
       broadcastState(evt);
@@ -221,10 +246,17 @@ const VidoraParty = (() => {
     }
 
     return function onPlayerEvent(e) {
-      if (role !== "host") { clearPending(); return; }
+      // Presence reporting applies to whichever role this browser actually
+      // is — host or guest — so it happens before the host-only gate below.
+      if (typeof e.currentTime === "number" && Number.isFinite(e.currentTime)) {
+        reportPresence(e.currentTime, e.event !== "pause" && e.event !== "ended");
+      }
+
+      if (role !== "host") { clearPendingPause(); clearPendingSeek(); return; }
 
       if (e.event === "pause") {
-        clearPending();
+        clearPendingSeek();
+        clearPendingPause();
         pendingPauseTimer = setTimeout(() => {
           pendingPauseTimer = null;
           isPlaying = false;
@@ -233,15 +265,26 @@ const VidoraParty = (() => {
         return;
       }
       if (e.event === "play") {
-        if (pendingPauseTimer) { clearPending(); return; } // it was a blip
+        clearPendingSeek();
+        if (pendingPauseTimer) { clearPendingPause(); return; } // it was a blip
         isPlaying = true;
         send({ event: "play", currentTime: e.currentTime, duration: e.duration });
         return;
       }
-      if (e.event === "seeked" || e.event === "ended") {
-        clearPending();
-        if (e.event === "ended") isPlaying = false;
-        send({ event: e.event, currentTime: e.currentTime, duration: e.duration });
+      if (e.event === "seeked") {
+        clearPendingPause();
+        clearPendingSeek();
+        pendingSeekTimer = setTimeout(() => {
+          pendingSeekTimer = null;
+          send({ event: "seeked", currentTime: e.currentTime, duration: e.duration });
+        }, SEEK_GRACE_MS);
+        return;
+      }
+      if (e.event === "ended") {
+        clearPendingPause();
+        clearPendingSeek();
+        isPlaying = false;
+        send({ event: "ended", currentTime: e.currentTime, duration: e.duration });
         return;
       }
       if (isPlaying && Date.now() - lastBroadcast > HEARTBEAT_MS) {

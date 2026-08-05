@@ -47,6 +47,61 @@ const PartyUI = (() => {
   // a real click, which browsers always allow to autoplay.
   let pendingResync = null;
 
+  // Reloading the iframe is disruptive, so once we do it we hold off on
+  // doing it again for a short window — RELOAD_COOLDOWN_MS — and coalesce
+  // anything that arrives during that window into a single follow-up reload
+  // using the LATEST known state, instead of reloading once per update. This
+  // is what actually stops a burst of updates (e.g. a host scrubbing the
+  // seek bar, or a few state polls landing close together) from hammering
+  // the guest's iframe over and over.
+  const RELOAD_COOLDOWN_MS = 3000;
+  let reloadCooldownUntil = 0;
+  let coalesceTimer = null;
+
+  function applySync(event, time) {
+    if (!currentCtx) return;
+    const iframe = currentCtx.getIframe();
+    if (!iframe) return;
+    lastAppliedState = { event, time };
+    const autoplay = event !== "pause";
+    iframe.src = currentCtx.buildSrc(time, autoplay);
+    reloadCooldownUntil = Date.now() + RELOAD_COOLDOWN_MS;
+    if (autoplay) {
+      // Can't confirm a cross-origin autoplay actually took hold from here —
+      // see the pendingResync/updateSyncBanner comments below. Cleared once
+      // a real "play" PLAYER_EVENT comes back from this iframe.
+      pendingResync = { time };
+    } else {
+      // Landing on a paused frame is never blocked by autoplay policy, so
+      // this one we can trust immediately — avoids a spurious "out of sync"
+      // flash while waiting for the reloaded iframe's first event.
+      pendingResync = null;
+      guestPlayer = { time, playing: false };
+    }
+    updateSyncBanner();
+  }
+
+  function formatTime(seconds) {
+    if (seconds == null || !Number.isFinite(seconds)) return "—";
+    const s = Math.max(0, Math.floor(seconds));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    return h > 0
+      ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`
+      : `${m}:${String(sec).padStart(2, "0")}`;
+  }
+
+  // Projects a participant's self-reported presence { time, playing,
+  // updatedAt } forward to right now, so a "Playing" person's displayed
+  // timestamp keeps ticking between their ~5s presence pings instead of
+  // freezing between updates.
+  function projectPresence(presence) {
+    if (!presence) return null;
+    if (!presence.playing) return presence.time;
+    return presence.time + (Date.now() - presence.updatedAt) / 1000;
+  }
+
   function projectedHostTime() {
     if (!hostState) return null;
     const playing = hostState.event !== "pause" && hostState.event !== "ended";
@@ -139,12 +194,25 @@ const PartyUI = (() => {
 
   function participantListHTML(list) {
     if (!list.length) return `<p class="party-empty-note">Waiting for people to join…</p>`;
-    return `<ul class="party-people">${list.map((p) => `
+    const hostEntry = list.find((p) => p.host);
+    const hostTime = hostEntry ? projectPresence(hostEntry.presence) : null;
+    return `<ul class="party-people">${list.map((p) => {
+      const t = projectPresence(p.presence);
+      const stale = !p.presence || Date.now() - p.presence.updatedAt > 15000;
+      const drift = !p.host && t != null && hostTime != null ? Math.abs(t - hostTime) : null;
+      // A little slack above the guest resync tolerance (DRIFT_TOLERANCE_SEC)
+      // so this badge doesn't flicker on the same small gaps that are
+      // already getting corrected automatically.
+      const offSync = drift != null && drift > DRIFT_TOLERANCE_SEC * 2;
+      const timeClasses = ["party-person-time", stale && "stale", offSync && "offsync"].filter(Boolean).join(" ");
+      return `
       <li class="party-person">
         <span class="party-avatar" style="background:${avatarColor(p.id)}">${avatarInner(p)}</span>
         <span class="party-person-name">${escName(p.name)}</span>
         ${p.host ? `<span class="party-person-tag">Host</span>` : ""}
-      </li>`).join("")}</ul>`;
+        <span class="${timeClasses}" title="${offSync ? `${Math.round(drift)}s behind the host` : ""}">${formatTime(t)}</span>
+      </li>`;
+    }).join("")}</ul>`;
   }
 
   // Shown in the create/join modal in place of a name field once a local
@@ -287,17 +355,8 @@ const PartyUI = (() => {
     });
     currentContainer.querySelector("#ptyResyncBtn").addEventListener("click", () => {
       if (!hostState || !currentCtx) return;
-      const iframe = currentCtx.getIframe();
-      const hostPlaying = hostState.event !== "pause";
-      const time = projectedHostTime() ?? hostState.time;
-      if (iframe) iframe.src = currentCtx.buildSrc(time, hostPlaying);
-      lastAppliedState = { event: hostState.event, time };
-      // Same autoplay caveat as the automatic path — except this reload runs
-      // straight from a real click, so browsers will actually allow it, and
-      // there's nothing left to fall back on.
-      pendingResync = null;
-      if (!hostPlaying) guestPlayer = { time, playing: false };
-      updateSyncBanner();
+      if (coalesceTimer) { clearTimeout(coalesceTimer); coalesceTimer = null; }
+      applySync(hostState.event, projectedHostTime() ?? hostState.time);
     });
 
     updateSyncBanner();
@@ -390,6 +449,15 @@ const PartyUI = (() => {
   // ---------------- global listeners (registered once) ----------------
   VidoraParty.on("participants", refreshParticipants);
 
+  // Purely visual — re-renders the (cheap) participant list every second so
+  // each person's projected timestamp keeps ticking between their actual
+  // ~5s presence pings, instead of sitting frozen and looking broken. Does
+  // no network work of its own; harmless no-op when there's no party card
+  // on screen.
+  setInterval(() => {
+    if (currentContainer && VidoraParty.inRoom()) refreshParticipants();
+  }, 1000);
+
   VidoraParty.on("media", (meta) => {
     if (!VidoraParty.isGuest()) return;
     if (currentCtx && matches(meta, currentCtx)) { render(); return; }
@@ -407,8 +475,7 @@ const PartyUI = (() => {
 
   VidoraParty.on("state", (state) => {
     if (!VidoraParty.isGuest() || !currentCtx) return;
-    const iframe = currentCtx.getIframe();
-    if (!iframe) return;
+    if (!currentCtx.getIframe()) return;
 
     // The host's video ending isn't something to "sync" by reloading the
     // guest's iframe — there's no meaningful position to resume, and
@@ -420,6 +487,7 @@ const PartyUI = (() => {
       hostState = { event: "ended", time: state.currentTime || (hostState ? hostState.time : 0), receivedAt: Date.now() };
       lastAppliedState = { event: state.event, time: hostState.time };
       pendingResync = null;
+      if (coalesceTimer) { clearTimeout(coalesceTimer); coalesceTimer = null; }
       updateSyncBanner();
       return;
     }
@@ -431,31 +499,30 @@ const PartyUI = (() => {
     const isCommand = state.event === "play" || state.event === "pause" || state.event === "seeked";
 
     // Max allowed drift before we force a resync. Commands (play/pause/seek)
-    // always apply immediately regardless of drift; heartbeats ("timeupdate",
-    // sent every 2 minutes per the host's HEARTBEAT_MS) are just a periodic
-    // safety-net check — only worth a reload once drift exceeds this.
-    // Skip near-duplicate updates so we don't reload the iframe for nothing
-    // (e.g. the same "play" arriving twice in a row with ~identical time).
-    // Kept at the same tolerance so this can't silently widen the effective
-    // drift window above DRIFT_TOLERANCE_SEC.
-    const shouldApply = isCommand || drift >= DRIFT_TOLERANCE_SEC;
-    const isDuplicate = state.event === lastAppliedState.event && state.event !== "seeked" && drift < DRIFT_TOLERANCE_SEC;
+    // always apply regardless of drift; heartbeats ("timeupdate", sent every
+    // 2 minutes per the host's HEARTBEAT_MS) are just a periodic safety-net
+    // check — only worth a reload once drift exceeds this. Skip near-
+    // duplicate updates so we don't reload for nothing (e.g. the same "play"
+    // arriving twice in a row with ~identical time).
+    const isDuplicate = state.event === lastAppliedState.event && drift < DRIFT_TOLERANCE_SEC;
+    const shouldApply = (isCommand || drift >= DRIFT_TOLERANCE_SEC) && !isDuplicate;
 
-    if (shouldApply && !isDuplicate) {
-      lastAppliedState = { event: state.event, time };
-      const autoplay = state.event !== "pause";
-      iframe.src = currentCtx.buildSrc(time, autoplay);
-      if (autoplay) {
-        // Can't confirm a cross-origin autoplay actually took hold from here
-        // — see the pendingResync/updateSyncBanner comments above. Cleared
-        // once a real "play" PLAYER_EVENT comes back from this iframe.
-        pendingResync = { time };
+    if (shouldApply) {
+      const now = Date.now();
+      if (now >= reloadCooldownUntil) {
+        if (coalesceTimer) { clearTimeout(coalesceTimer); coalesceTimer = null; }
+        applySync(state.event, time);
       } else {
-        // Landing on a paused frame is never blocked by autoplay policy, so
-        // this one we can trust immediately — avoids a spurious "out of
-        // sync" flash while waiting for the reloaded iframe's first event.
-        pendingResync = null;
-        guestPlayer = { time, playing: false };
+        // A reload just happened moments ago — instead of reloading again
+        // right on top of it, wait out the cooldown and then apply only the
+        // FINAL state on hand at that point (hostState keeps getting
+        // updated above as more updates arrive), so a burst collapses into
+        // one reload instead of one per update.
+        if (coalesceTimer) clearTimeout(coalesceTimer);
+        coalesceTimer = setTimeout(() => {
+          coalesceTimer = null;
+          applySync(hostState.event, hostState.time);
+        }, reloadCooldownUntil - now);
       }
     }
 

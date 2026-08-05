@@ -1148,6 +1148,12 @@ body.no-scroll { overflow: hidden; height: 100dvh; }
   flex: none; font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
   color: var(--accent-gold); border: 1px solid var(--accent-gold-dim); border-radius: 999px; padding: 2px 8px;
 }
+.party-person-time {
+  flex: none; font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted);
+  min-width: 38px; text-align: right;
+}
+.party-person-time.stale { opacity: 0.45; }
+.party-person-time.offsync { color: #e0895a; }
 .party-empty-note { color: var(--text-muted); font-size: 13px; font-style: italic; margin: 0; }
 
 .party-actions { position: relative; display: flex; justify-content: flex-end; margin-top: 20px; }

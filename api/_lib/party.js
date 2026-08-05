@@ -47,10 +47,25 @@ export function sanitizeAvatar(avatar) {
   return avatar;
 }
 
+// A participant's own last-reported playback position — separate from
+// `room.lastState` (which is only ever the HOST's authoritative state, used
+// to drive guests' iframes). Presence is one-way informational data: every
+// participant (host included) reports where THEIR OWN player actually is,
+// purely so the party list can show everyone's live position and flag
+// anyone who's drifted — it never drives a reload by itself.
+const MAX_PRESENCE_SECONDS = 100000000; // generous sanity cap, not a real runtime limit
+export function sanitizePresence(time, playing) {
+  const t = Number(time);
+  if (!Number.isFinite(t) || t < 0 || t > MAX_PRESENCE_SECONDS) return null;
+  return { time: t, playing: !!playing, updatedAt: Date.now() };
+}
+
 export function publicParticipants(room) {
   return [
-    { id: 'host', name: room.hostName, host: true, avatar: room.hostAvatar || null },
-    ...Object.entries(room.guests || {}).map(([id, g]) => ({ id, name: g.name, host: false, avatar: g.avatar || null })),
+    { id: 'host', name: room.hostName, host: true, avatar: room.hostAvatar || null, presence: room.hostPresence || null },
+    ...Object.entries(room.guests || {}).map(([id, g]) => (
+      { id, name: g.name, host: false, avatar: g.avatar || null, presence: g.presence || null }
+    )),
   ];
 }
 

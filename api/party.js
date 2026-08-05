@@ -5,6 +5,7 @@ import {
   ROOM_TTL_SECONDS,
   cleanMeta,
   sanitizeAvatar,
+  sanitizePresence,
   getRoomKey,
   hashPassword,
   publicParticipants,
@@ -164,6 +165,35 @@ export default async function handler(req, res) {
 
     room.mediaMeta = cleanMeta(req.body?.mediaMeta);
     room.lastState = null;
+    room.updatedAt = Date.now();
+    await saveRoom(roomId, room);
+    return res.status(200).json({ ok: true });
+  }
+
+  // ---------------- presence (anyone reports their OWN live position) ----------------
+  // Purely informational — shown next to each name in the party list so
+  // everyone can see how in sync they actually are. Never touches
+  // room.lastState, so it can never trigger a guest iframe reload by itself.
+  if (action === 'presence') {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    const rl = await rateLimit(`party-presence:${ip}`, 40, 60);
+    if (!rl.allowed) return res.status(429).json({ error: 'Too many requests' });
+
+    const roomId = readRoomId(req);
+    const room = roomId ? await getRoom(roomId) : null;
+    if (!room) return res.status(404).json({ error: 'Room not found or the party has ended.' });
+
+    const token = readToken(req);
+    const presence = sanitizePresence(req.body?.time, req.body?.playing);
+    if (!presence) return res.status(400).json({ error: 'Invalid presence data.' });
+
+    if (token && token === room.hostToken) {
+      room.hostPresence = presence;
+    } else {
+      const guestEntry = Object.entries(room.guests || {}).find(([, g]) => g.token === token);
+      if (!guestEntry) return res.status(403).json({ error: 'Unauthorized.' });
+      room.guests[guestEntry[0]].presence = presence;
+    }
     room.updatedAt = Date.now();
     await saveRoom(roomId, room);
     return res.status(200).json({ ok: true });

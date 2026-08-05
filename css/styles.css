@@ -1082,6 +1082,23 @@ body.no-scroll { overflow: hidden; height: 100dvh; }
 .party-sub { position: relative; color: var(--text-secondary); font-size: 13.5px; line-height: 1.55; margin: 10px 0 0; max-width: 520px; }
 .party-sub strong { color: var(--text-primary); }
 
+.party-status {
+  position: relative; margin: 8px 0 0; font-family: var(--font-mono); font-size: 11.5px;
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted);
+}
+
+.party-resync {
+  position: relative; display: none; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 14px; padding: 10px 14px; border-radius: var(--radius-sm);
+  border: 1px solid rgba(232,184,75,0.35); background: rgba(232,184,75,0.08);
+}
+.party-resync span { font-size: 13px; color: var(--text-primary); }
+.party-resync .btn { flex: none; }
+@media (max-width: 520px) {
+  .party-resync { flex-direction: column; align-items: stretch; text-align: center; }
+  .party-resync .btn { width: 100%; }
+}
+
 .party-invite {
   position: relative; margin-top: 18px;
   background: var(--bg-elevated); border: 1px solid var(--border-hairline);

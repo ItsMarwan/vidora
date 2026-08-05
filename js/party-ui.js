@@ -22,6 +22,74 @@ const PartyUI = (() => {
   let currentCtx = null;
   let lastAppliedState = { event: null, time: -999 };
 
+  const DRIFT_TOLERANCE_SEC = 1;
+
+  // The host's last known status, as reported by Watch Party — used for the
+  // "Host: Playing/Paused" status line and to work out whether the guest is
+  // actually caught up. `receivedAt` lets us project forward while the host
+  // keeps playing (see projectedHostTime) instead of comparing against an
+  // increasingly-stale snapshot.
+  let hostState = null; // { event, time, receivedAt }
+
+  // What the GUEST's own iframe is actually reporting via its PLAYER_EVENT
+  // postMessages — the ground truth for "is this browser actually in sync",
+  // as opposed to `lastAppliedState` which only reflects what we last *told*
+  // the iframe to load (and, for autoplay reloads, that's not a guarantee it
+  // actually started — see pendingResync below).
+  let guestPlayer = { time: null, playing: null };
+
+  // Set whenever a guest-side sync reload needed autoplay (state.event !==
+  // "pause"). Cross-origin embeds can't be autoplayed from a background
+  // poll callback without a real user gesture, so a reload alone doesn't
+  // guarantee playback actually started — this stays set until a genuine
+  // "play" PLAYER_EVENT comes back from the guest's own iframe, confirming
+  // it. While set, the sync banner's button is the fallback: tapping it is
+  // a real click, which browsers always allow to autoplay.
+  let pendingResync = null;
+
+  function projectedHostTime() {
+    if (!hostState) return null;
+    const playing = hostState.event !== "pause" && hostState.event !== "ended";
+    if (!playing) return hostState.time;
+    return hostState.time + (Date.now() - hostState.receivedAt) / 1000;
+  }
+
+  // Updates the status line + sync banner in place, without a full render()
+  // (render() would rebuild the whole card and re-seed state). Safe to call
+  // often — no-ops quietly if the guest card isn't the thing on screen right
+  // now (host panel, start button, or a different party altogether).
+  function updateSyncBanner() {
+    if (!currentContainer || !VidoraParty.isGuest()) return;
+    const statusEl = currentContainer.querySelector("#ptyHostStatus");
+    if (statusEl && hostState) {
+      const playing = hostState.event !== "pause" && hostState.event !== "ended";
+      statusEl.textContent = hostState.event === "ended" ? "Host: finished watching" : `Host: ${playing ? "Playing" : "Paused"}`;
+    }
+
+    const bannerEl = currentContainer.querySelector("#ptyResync");
+    if (!bannerEl || !hostState || hostState.event === "ended") {
+      if (bannerEl) bannerEl.style.display = "none";
+      return;
+    }
+
+    const hostPlaying = hostState.event !== "pause";
+    const target = projectedHostTime();
+    const drift = guestPlayer.time != null && target != null ? Math.abs(guestPlayer.time - target) : Infinity;
+    const needsSync = Boolean(pendingResync) || drift > DRIFT_TOLERANCE_SEC;
+
+    if (!needsSync) { bannerEl.style.display = "none"; return; }
+
+    const msgEl = bannerEl.querySelector("#ptyResyncMsg");
+    if (msgEl) {
+      msgEl.textContent = pendingResync
+        ? "Host started playback — tap to join in"
+        : hostPlaying
+          ? `You're ${Math.round(drift)}s behind — tap to jump to their spot`
+          : "Host paused — tap to match them";
+    }
+    bannerEl.style.display = "flex";
+  }
+
   function matches(meta, ctx) {
     if (!meta || !ctx) return false;
     if (meta.mediaType !== ctx.mediaType || String(meta.id) !== String(ctx.id)) return false;
@@ -82,7 +150,9 @@ const PartyUI = (() => {
   // Shown in the create/join modal in place of a name field once a local
   // profile exists — the person's identity is already decided.
   function identityChipHTML(verb) {
-    const profile = window.VidoraProfile && VidoraProfile.getProfile();
+    // Same window.VidoraProfile pitfall as party.js's resolveIdentity() —
+    // see the note there. Check the bare global instead.
+    const profile = typeof VidoraProfile !== "undefined" && VidoraProfile.getProfile();
     if (!profile) return "";
     return `
       <div class="party-profile-chip">
@@ -175,6 +245,9 @@ const PartyUI = (() => {
     // giant, reload-triggering jump.
     const seed = VidoraParty.getLastState();
     lastAppliedState = seed ? { event: seed.event, time: seed.currentTime || 0 } : { event: null, time: -999 };
+    hostState = seed ? { event: seed.event, time: seed.currentTime || 0, receivedAt: Date.now() } : null;
+    guestPlayer = { time: null, playing: null };
+    pendingResync = null;
 
     const host = VidoraParty.getParticipants().find((p) => p.host);
     currentContainer.innerHTML = `
@@ -188,6 +261,12 @@ const PartyUI = (() => {
           <span class="party-role-tag guest">Watching along</span>
         </div>
         <p class="party-sub"><strong>${escName(host ? host.name : "Host")}</strong> is in control — your player follows their play, pause and seek automatically.</p>
+        <p class="party-status" id="ptyHostStatus">Host: —</p>
+
+        <div class="party-resync" id="ptyResync" style="display:none;">
+          <span id="ptyResyncMsg"></span>
+          <button class="btn btn-primary btn-sm" id="ptyResyncBtn" type="button">Sync now</button>
+        </div>
 
         <div class="party-section">
           <div class="party-section-head">
@@ -206,6 +285,22 @@ const PartyUI = (() => {
       VidoraParty.leaveRoom();
       render();
     });
+    currentContainer.querySelector("#ptyResyncBtn").addEventListener("click", () => {
+      if (!hostState || !currentCtx) return;
+      const iframe = currentCtx.getIframe();
+      const hostPlaying = hostState.event !== "pause";
+      const time = projectedHostTime() ?? hostState.time;
+      if (iframe) iframe.src = currentCtx.buildSrc(time, hostPlaying);
+      lastAppliedState = { event: hostState.event, time };
+      // Same autoplay caveat as the automatic path — except this reload runs
+      // straight from a real click, so browsers will actually allow it, and
+      // there's nothing left to fall back on.
+      pendingResync = null;
+      if (!hostPlaying) guestPlayer = { time, playing: false };
+      updateSyncBanner();
+    });
+
+    updateSyncBanner();
   }
 
   function renderStartButton() {
@@ -225,7 +320,8 @@ const PartyUI = (() => {
 
   function openStartModal() {
     const ctx = currentCtx;
-    const hasProfile = window.VidoraProfile && VidoraProfile.hasProfile();
+    // Same window.VidoraProfile pitfall — see resolveIdentity() in party.js.
+    const hasProfile = typeof VidoraProfile !== "undefined" && VidoraProfile.hasProfile();
     const nameFieldHTML = hasProfile
       ? identityChipHTML("Hosting")
       : `<label for="ptyName">Your name</label><input type="text" id="ptyName" placeholder="Host" maxlength="20" />`;
@@ -321,11 +417,16 @@ const PartyUI = (() => {
     // finished, effectively restarting it. Just note it happened and leave
     // the guest's own player to finish on its own.
     if (state.event === "ended") {
-      lastAppliedState = { event: state.event, time: state.currentTime || lastAppliedState.time };
+      hostState = { event: "ended", time: state.currentTime || (hostState ? hostState.time : 0), receivedAt: Date.now() };
+      lastAppliedState = { event: state.event, time: hostState.time };
+      pendingResync = null;
+      updateSyncBanner();
       return;
     }
 
     const time = state.currentTime || 0;
+    hostState = { event: state.event, time, receivedAt: Date.now() };
+
     const drift = Math.abs(time - lastAppliedState.time);
     const isCommand = state.event === "play" || state.event === "pause" || state.event === "seeked";
 
@@ -333,23 +434,55 @@ const PartyUI = (() => {
     // always apply immediately regardless of drift; heartbeats ("timeupdate",
     // sent every 2 minutes per the host's HEARTBEAT_MS) are just a periodic
     // safety-net check — only worth a reload once drift exceeds this.
-    const DRIFT_TOLERANCE_SEC = 1;
-    if (!isCommand && drift < DRIFT_TOLERANCE_SEC) return;
     // Skip near-duplicate updates so we don't reload the iframe for nothing
     // (e.g. the same "play" arriving twice in a row with ~identical time).
     // Kept at the same tolerance so this can't silently widen the effective
     // drift window above DRIFT_TOLERANCE_SEC.
-    if (state.event === lastAppliedState.event && state.event !== "seeked" && drift < DRIFT_TOLERANCE_SEC) return;
+    const shouldApply = isCommand || drift >= DRIFT_TOLERANCE_SEC;
+    const isDuplicate = state.event === lastAppliedState.event && state.event !== "seeked" && drift < DRIFT_TOLERANCE_SEC;
 
-    lastAppliedState = { event: state.event, time };
-    const autoplay = state.event !== "pause";
-    iframe.src = currentCtx.buildSrc(time, autoplay);
+    if (shouldApply && !isDuplicate) {
+      lastAppliedState = { event: state.event, time };
+      const autoplay = state.event !== "pause";
+      iframe.src = currentCtx.buildSrc(time, autoplay);
+      if (autoplay) {
+        // Can't confirm a cross-origin autoplay actually took hold from here
+        // — see the pendingResync/updateSyncBanner comments above. Cleared
+        // once a real "play" PLAYER_EVENT comes back from this iframe.
+        pendingResync = { time };
+      } else {
+        // Landing on a paused frame is never blocked by autoplay policy, so
+        // this one we can trust immediately — avoids a spurious "out of
+        // sync" flash while waiting for the reloaded iframe's first event.
+        pendingResync = null;
+        guestPlayer = { time, playing: false };
+      }
+    }
+
+    updateSyncBanner();
+  });
+
+  // Ground-truth read of the GUEST's own iframe (not the host's) — confirms
+  // whether an autoplay reload actually started, and feeds the live drift
+  // check in updateSyncBanner. Registered once; cheap no-op unless the
+  // guest card is actually mounted and there's a hostState to compare to.
+  window.addEventListener("message", (event) => {
+    if (!VidoraParty.isGuest()) return;
+    let data;
+    try { data = typeof event.data === "string" ? JSON.parse(event.data) : event.data; } catch { return; }
+    if (!data || data.type !== "PLAYER_EVENT") return;
+    const e = data.data || {};
+    if (typeof e.currentTime !== "number" || !Number.isFinite(e.currentTime)) return;
+    guestPlayer = { time: e.currentTime, playing: e.event !== "pause" && e.event !== "ended" };
+    if (pendingResync && e.event === "play") pendingResync = null;
+    updateSyncBanner();
   });
 
   // ---------------- join page (#/party/:roomId) ----------------
   function renderJoinPage(container, roomId) {
     container.innerHTML = `<div class="empty-state"><h3>Joining party…</h3></div>`;
-    const hasProfile = window.VidoraProfile && VidoraProfile.hasProfile();
+    // Same window.VidoraProfile pitfall — see resolveIdentity() in party.js.
+    const hasProfile = typeof VidoraProfile !== "undefined" && VidoraProfile.hasProfile();
     const nameFieldHTML = hasProfile
       ? identityChipHTML("Joining")
       : `<label for="jName">Your name</label><input type="text" id="jName" placeholder="Guest" maxlength="20" />`;

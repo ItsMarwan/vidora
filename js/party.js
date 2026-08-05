@@ -62,7 +62,13 @@ const VidoraParty = (() => {
   // value wasn't provided (e.g. the name field was hidden because a
   // profile already exists).
   function resolveIdentity(explicitName) {
-    const profile = window.VidoraProfile && VidoraProfile.getProfile();
+    // NOTE: VidoraProfile is declared as a top-level `const` in profile.js,
+    // loaded as a plain <script> (not a module) — that means it's a valid
+    // global binding (usable as plain `VidoraProfile`) but NEVER becomes a
+    // property of `window`. Checking `window.VidoraProfile` here always
+    // evaluated to undefined, so the local profile's name/avatar were never
+    // picked up for hosting or joining a room, no matter what was saved.
+    const profile = typeof VidoraProfile !== "undefined" && VidoraProfile.getProfile();
     const name = (explicitName && explicitName.trim()) || (profile && profile.name) || null;
     const avatar = (profile && profile.image) || null;
     return { name, avatar };

@@ -617,6 +617,8 @@ async function renderMovieDetail(id, token) {
         <h1 class="detail-title">${m.title}</h1>
         <div class="detail-meta">${starRow(m.rating)}<span>${m.year || ""}</span>${m.runtime ? `<span>${m.runtime} min</span>` : ""}${m.certification ? `<span class="cert-badge">${escAttr(m.certification)}</span>` : ""}</div>
         <div class="genre-tags">${(m.genres || []).map((g) => `<span class="genre-tag">${g}</span>`).join("")}</div>
+        ${m.certificationDescription ? `<div class="detail-rating-desc">${escAttr(m.certificationDescription)}</div>` : ""}
+        ${m.guideUrl ? `<a class="detail-guide-link" href="${escAttr(m.guideUrl)}" target="_blank" rel="noopener">IMDb parental guide</a>` : ""}
         <p class="detail-overview">${m.overview || ""}</p>
         <div class="detail-actions">
           <a class="btn btn-ticket" href="/watch/movie/${m.id}">${VD.icon("playFilled", { size: 15 })} Play movie</a>
@@ -652,6 +654,8 @@ async function renderSeriesDetail(id, seasonParam, token) {
         <h1 class="detail-title">${s.title}</h1>
         <div class="detail-meta">${starRow(s.rating)}<span>${s.year || ""}</span><span>${s.seasons.length} season${s.seasons.length > 1 ? "s" : ""}</span>${s.certification ? `<span class="cert-badge">${escAttr(s.certification)}</span>` : ""}</div>
         <div class="genre-tags">${(s.genres || []).map((g) => `<span class="genre-tag">${g}</span>`).join("")}</div>
+        ${s.certificationDescription ? `<div class="detail-rating-desc">${escAttr(s.certificationDescription)}</div>` : ""}
+        ${s.guideUrl ? `<a class="detail-guide-link" href="${escAttr(s.guideUrl)}" target="_blank" rel="noopener">IMDb parental guide</a>` : ""}
         <p class="detail-overview">${s.overview || ""}</p>
         <div class="detail-actions">
           <a class="btn btn-ticket" href="/watch/series/${id}/${seasonNum}/${season.episodes[0]?.episode_number || 1}">${VD.icon("playFilled", { size: 15 })} Play Season ${seasonNum}</a>
@@ -984,9 +988,11 @@ function wireSearchInput(input) {
     }
     sugEl.innerHTML = suggestions.map((s, i) =>
       `<div class="suggestion-item" role="option" data-index="${i}" data-href="${escAttr(s.href)}">
-         <div class="suggestion-title">${escAttr(s.title)}</div>
-         <div class="suggestion-meta">${escAttr(s.year || '')}</div>
-         <div class="suggestion-type">${escAttr(s.type)}</div>
+         <img class="suggestion-thumb" src="${escAttr(s.image)}" alt="${escAttr(s.title)} poster" />
+         <div class="suggestion-copy">
+           <span class="suggestion-title">${escAttr(s.title)}</span>
+           <span class="suggestion-meta">${escAttr(s.year || '')} · ${escAttr(s.type)}</span>
+         </div>
        </div>`).join('');
     sugEl.style.display = '';
   }
@@ -1022,6 +1028,7 @@ function wireSearchInput(input) {
           year: it.year || it.first_air_date || it.year || '',
           href: it.mediaType === 'tv' ? `/series/${it.id}` : `/movie/${it.id}`,
           type: it.mediaType === 'tv' ? 'Series' : 'Movie',
+          image: it.poster || it.backdrop || VidoraData.placeholder(it.title || it.name || 'Title', 80, 120),
         }));
         // Only render if query hasn't changed
         if (lastQuery === val) renderSuggestions(items);

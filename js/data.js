@@ -267,6 +267,32 @@ const VidoraData = (() => {
     }
   }
 
+  function ratingDescriptor(cert) {
+    const descriptions = {
+      G: "General audiences — no nudity or violence.",
+      PG: "Parental guidance suggested — mild violence or language.",
+      "PG-13": "Teens 13+ — moderate violence, language, or suggestive themes.",
+      R: "Restricted — violence, language, or brief nudity.",
+      "NC-17": "Adults only — explicit content.",
+      "TV-Y": "All children — very mild content.",
+      "TV-Y7": "Older children — mild fantasy violence.",
+      "TV-G": "General audiences — suitable for all ages.",
+      "TV-PG": "Parental guidance suggested — mild themes.",
+      "TV-14": "Teens 14+ — intense themes or violence.",
+      "TV-MA": "Mature audiences — strong language, violence, nudity.",
+      M: "Mature audiences — may include violence, language, nudity.",
+      "16+": "Mature 16+ — may include strong themes and violence.",
+      "18+": "Adults only — explicit content.",
+      "13+": "Teens 13+ — mild violence or suggestive themes.",
+    };
+    const key = String(cert || "").trim();
+    return descriptions[key] || (key ? `Rated ${key}` : "Rating not available");
+  }
+
+  function imdbGuideUrl(imdbId) {
+    return imdbId ? `https://www.imdb.com/title/${imdbId}/parentalguide` : "";
+  }
+
   function adaptMovie(m) {
     return {
       id: m.id, title: m.title, year: (m.release_date || "").slice(0, 4),
@@ -274,6 +300,7 @@ const VidoraData = (() => {
       poster: img(m.poster_path), backdrop: img(m.backdrop_path, "w1280"),
       genres: (m.genres || []).map((g) => g.name), runtime: m.runtime, mediaType: "movie",
       originalLanguage: m.original_language,
+      imdbId: m.imdb_id || "",
     };
   }
 
@@ -285,6 +312,7 @@ const VidoraData = (() => {
       genres: (s.genres || []).map((g) => g.name), mediaType: "tv",
       seasons: (s.seasons || []).filter((se) => se.season_number > 0),
       originalLanguage: s.original_language,
+      imdbId: "",
     };
   }
 
@@ -405,13 +433,25 @@ const VidoraData = (() => {
               cert = r ? r.certification : "";
             }
             base.certification = cert || "";
-          } catch (e) { base.certification = ""; }
+            base.certificationDescription = ratingDescriptor(base.certification);
+            base.guideUrl = imdbGuideUrl(base.imdbId);
+          } catch (e) {
+            base.certification = "";
+            base.certificationDescription = ratingDescriptor("");
+            base.guideUrl = imdbGuideUrl(base.imdbId);
+          }
           return base;
         },
         () => {
           const m = [...demoMoviesDecorated, ...demoMoviesArDecorated].find((m) => String(m.id) === String(id));
           if (!m) return m;
-          return { ...m, certification: m.certification || (m.rating && m.rating >= 8 ? '16+' : '13+') };
+          const cert = m.certification || (m.rating && m.rating >= 8 ? '16+' : '13+');
+          return {
+            ...m,
+            certification: cert,
+            certificationDescription: ratingDescriptor(cert),
+            guideUrl: m.imdbId ? imdbGuideUrl(m.imdbId) : "",
+          };
         },
       );
     },
@@ -426,12 +466,23 @@ const VidoraData = (() => {
             const us = results.find((r) => r.iso_3166_1 === 'US') || results[0];
             base.certification = us && us.rating ? us.rating : "";
           } catch (e) { base.certification = ""; }
+          try {
+            const ext = await tmdb(`/tv/${id}/external_ids`);
+            base.imdbId = ext?.imdb_id || "";
+          } catch (e) { base.imdbId = ""; }
+          base.certificationDescription = ratingDescriptor(base.certification);
+          base.guideUrl = imdbGuideUrl(base.imdbId);
           return base;
         },
         () => {
           const s = [...demoShowsDecorated, ...demoShowsArDecorated].find((s) => String(s.id) === String(id));
           if (!s) return s;
-          return { ...s, certification: s.certification || (s.rating && s.rating >= 8 ? '16+' : '13+') };
+          return {
+            ...s,
+            certification: s.certification || (s.rating && s.rating >= 8 ? '16+' : '13+'),
+            certificationDescription: ratingDescriptor(s.certification || (s.rating && s.rating >= 8 ? '16+' : '13+')),
+            guideUrl: s.imdbId ? imdbGuideUrl(s.imdbId) : "",
+          };
         },
       );
     },

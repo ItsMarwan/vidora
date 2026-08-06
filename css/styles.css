@@ -190,6 +190,7 @@ button { font-family: inherit; cursor: pointer; }
   display: flex;
   align-items: center;
   gap: 10px;
+  position: relative;
 }
 .nav-search input {
   background: var(--bg-elevated);
@@ -353,6 +354,7 @@ body.no-scroll { overflow: hidden; height: 100dvh; }
 }
 .mobile-menu-close:hover { background: rgba(242,240,235,0.12); transform: rotate(90deg); }
 .mobile-menu-search { margin-bottom: 22px; flex-shrink: 0; }
+.mobile-menu-search { position: relative; }
 .mobile-menu-search input {
   width: 100%;
   background: var(--bg-elevated);
@@ -364,6 +366,38 @@ body.no-scroll { overflow: hidden; height: 100dvh; }
   font-size: 16px; /* 16px avoids iOS Safari auto-zooming in on focus */
 }
 .mobile-menu-search input::placeholder { color: var(--text-muted); }
+
+/* ---------------- Search autocomplete ---------------- */
+.search-suggestions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  z-index: 50;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-hairline);
+  border-top: none;
+  box-shadow: 0 12px 28px rgba(0,0,0,0.6);
+  max-height: 320px;
+  overflow: auto;
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+.search-suggestions .suggestion-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  color: var(--text-primary);
+}
+.search-suggestions .suggestion-item:hover,
+.search-suggestions .suggestion-item.active {
+  background: var(--bg-elevated-hover);
+}
+.suggestion-title { font-weight: 700; font-size: 14px; }
+.suggestion-meta { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); margin-left: auto; }
+.suggestion-type { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin-left: 8px; }
 
 /* Rows + CTA stagger in with a short rise-and-fade, timed off --i (set
    inline per element) and gated on .animate-in so nothing moves before the
@@ -705,7 +739,7 @@ body.no-scroll { overflow: hidden; height: 100dvh; }
   display: flex;
   gap: 18px;
   overflow-x: auto;
-  padding: 6px 32px 20px;
+  padding: 6px 20px 20px;
   scroll-snap-type: x proximity;
   overscroll-behavior-x: contain;
   cursor: grab;
@@ -734,14 +768,14 @@ body.no-scroll { overflow: hidden; height: 100dvh; }
   color: var(--text-primary);
   font-size: 19px;
   line-height: 1;
-  z-index: 6;
+  z-index: 12;
   cursor: pointer;
   opacity: 1;
   transition: opacity 0.15s ease, background 0.15s ease, scale 0.15s ease;
 }
 .row-nav-btn:hover:not(:disabled) { scale: 1.08; }
-.row-nav-prev { left: 6px; }
-.row-nav-next { right: 6px; }
+.row-nav-prev { left: 12px; }
+.row-nav-next { right: 12px; }
 /* Disabled (at the start/end of the row) fades out rather than fully
    vanishing, so the control never mysteriously "isn't there". */
 .row-nav-btn:disabled { opacity: 0 !important; pointer-events: none; }
@@ -785,6 +819,29 @@ body.no-scroll { overflow: hidden; height: 100dvh; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.card-cert {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  background: rgba(0,0,0,0.6);
+  color: var(--text-primary);
+  padding: 3px 7px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  z-index: 4;
+  border: 1px solid rgba(255,255,255,0.04);
+}
+.cert-badge {
+  display: inline-block;
+  background: rgba(0,0,0,0.55);
+  color: var(--text-primary);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  margin-left: 8px;
 }
 .card-meta {
   font-family: var(--font-mono);

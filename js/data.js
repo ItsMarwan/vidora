@@ -391,14 +391,48 @@ const VidoraData = (() => {
       // requested it already came from a correctly-filtered list (or the
       // user's own Continue Watching / My List / a Watch Party invite).
       return tmdbOrDemoFallback(
-        async () => adaptMovie(await tmdb(`/movie/${id}`)),
-        () => [...demoMoviesDecorated, ...demoMoviesArDecorated].find((m) => String(m.id) === String(id)),
+        async () => {
+          const m = await tmdb(`/movie/${id}`);
+          const base = adaptMovie(m);
+          // Try to find a country-specific certification (prefer US)
+          try {
+            const rd = await tmdb(`/movie/${id}/release_dates`);
+            const results = rd.results || [];
+            const us = results.find((r) => r.iso_3166_1 === 'US') || results[0];
+            let cert = "";
+            if (us && Array.isArray(us.release_dates)) {
+              const r = us.release_dates.find((d) => d.certification && d.certification.trim());
+              cert = r ? r.certification : "";
+            }
+            base.certification = cert || "";
+          } catch (e) { base.certification = ""; }
+          return base;
+        },
+        () => {
+          const m = [...demoMoviesDecorated, ...demoMoviesArDecorated].find((m) => String(m.id) === String(id));
+          if (!m) return m;
+          return { ...m, certification: m.certification || (m.rating && m.rating >= 8 ? '16+' : '13+') };
+        },
       );
     },
     async showDetails(id) {
       return tmdbOrDemoFallback(
-        async () => adaptShow(await tmdb(`/tv/${id}`)),
-        () => [...demoShowsDecorated, ...demoShowsArDecorated].find((s) => String(s.id) === String(id)),
+        async () => {
+          const s = await tmdb(`/tv/${id}`);
+          const base = adaptShow(s);
+          try {
+            const cr = await tmdb(`/tv/${id}/content_ratings`);
+            const results = cr.results || [];
+            const us = results.find((r) => r.iso_3166_1 === 'US') || results[0];
+            base.certification = us && us.rating ? us.rating : "";
+          } catch (e) { base.certification = ""; }
+          return base;
+        },
+        () => {
+          const s = [...demoShowsDecorated, ...demoShowsArDecorated].find((s) => String(s.id) === String(id));
+          if (!s) return s;
+          return { ...s, certification: s.certification || (s.rating && s.rating >= 8 ? '16+' : '13+') };
+        },
       );
     },
     async seasonDetails(showId, seasonNumber) {

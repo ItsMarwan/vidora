@@ -30,6 +30,17 @@ if (redirectedPath) {
 
   document.addEventListener('click', (e) => {
     const a = e.target.closest && e.target.closest('a');
+    // If a recent row drag just happened, suppress navigation for anchors
+    // inside the horizontal `.row-scroll` so dragging a card doesn't
+    // accidentally follow its link.
+    try {
+      if (typeof rowDragJustMoved !== 'undefined' && rowDragJustMoved && a && a.closest && a.closest('.row-scroll')) {
+        rowDragJustMoved = false;
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+    } catch (err) {}
     if (!a || !a.href) return;
 
     if (isBlockableUrl(a.href)) {
@@ -290,6 +301,7 @@ function card(item) {
     <a class="card" href="${href}">
       <div class="card-poster-wrap">
         ${thumbImg(item.poster, item.title, { w: 500, h: 750 })}
+        ${item.certification ? `<span class="card-cert">${escAttr(item.certification)}</span>` : ""}
         ${bar}
         ${favButtonHTML(item, { compact: true })}
       </div>
@@ -418,7 +430,8 @@ let rowDragJustMoved = false;
 window.addEventListener("mousemove", (e) => {
   if (!rowDrag) return;
   const dx = e.pageX - rowDrag.startX;
-  if (Math.abs(dx) > 4) rowDrag.moved = true;
+  const dy = e.pageY - (rowDrag.startY || 0);
+  if (Math.abs(dx) > 6 || Math.abs(dy) > 6) rowDrag.moved = true;
   rowDrag.track.scrollLeft = rowDrag.startScroll - dx;
 });
 window.addEventListener("mouseup", () => {
@@ -471,7 +484,7 @@ function wireRowScrollers(container) {
     track.addEventListener("mousedown", (e) => {
       if (e.button !== 0) return;
       e.preventDefault();
-      rowDrag = { track, startX: e.pageX, startScroll: track.scrollLeft, moved: false };
+      rowDrag = { track, startX: e.pageX, startY: e.pageY, startScroll: track.scrollLeft, moved: false };
       track.classList.add("dragging");
     });
     track.addEventListener("click", (e) => {
@@ -602,7 +615,7 @@ async function renderMovieDetail(id, token) {
       <div class="detail-poster">${thumbImg(m.poster, m.title, { w: 500, h: 750 })}</div>
       <div class="detail-main">
         <h1 class="detail-title">${m.title}</h1>
-        <div class="detail-meta">${starRow(m.rating)}<span>${m.year || ""}</span>${m.runtime ? `<span>${m.runtime} min</span>` : ""}</div>
+        <div class="detail-meta">${starRow(m.rating)}<span>${m.year || ""}</span>${m.runtime ? `<span>${m.runtime} min</span>` : ""}${m.certification ? `<span class="cert-badge">${escAttr(m.certification)}</span>` : ""}</div>
         <div class="genre-tags">${(m.genres || []).map((g) => `<span class="genre-tag">${g}</span>`).join("")}</div>
         <p class="detail-overview">${m.overview || ""}</p>
         <div class="detail-actions">
@@ -637,7 +650,7 @@ async function renderSeriesDetail(id, seasonParam, token) {
       <div class="detail-poster">${thumbImg(s.poster, s.title, { w: 500, h: 750 })}</div>
       <div class="detail-main">
         <h1 class="detail-title">${s.title}</h1>
-        <div class="detail-meta">${starRow(s.rating)}<span>${s.year || ""}</span><span>${s.seasons.length} season${s.seasons.length > 1 ? "s" : ""}</span></div>
+        <div class="detail-meta">${starRow(s.rating)}<span>${s.year || ""}</span><span>${s.seasons.length} season${s.seasons.length > 1 ? "s" : ""}</span>${s.certification ? `<span class="cert-badge">${escAttr(s.certification)}</span>` : ""}</div>
         <div class="genre-tags">${(s.genres || []).map((g) => `<span class="genre-tag">${g}</span>`).join("")}</div>
         <p class="detail-overview">${s.overview || ""}</p>
         <div class="detail-actions">
@@ -713,6 +726,7 @@ function playerDetailsBlock(item, features) {
         <div class="detail-meta">
           ${starRow(item.rating)}
           ${item.year ? `<span>${item.year}</span>` : ""}
+          ${item.certification ? `<span class="cert-badge">${escAttr(item.certification)}</span>` : ""}
           ${item.runtime ? `<span>${item.runtime} min</span>` : ""}
         </div>
         ${(item.genres || []).length ? `<div class="genre-tags">${item.genres.map((g) => `<span class="genre-tag">${g}</span>`).join("")}</div>` : ""}
@@ -944,11 +958,138 @@ async function goSurpriseMe() {
 }
 
 function wireSearchInput(input) {
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && input.value.trim()) {
-      closeMobileMenu();
-      navigate(`/search/${encodeURIComponent(input.value.trim())}`);
+  if (!input) return;
+
+  // Create suggestions container
+  const wrap = input.parentElement;
+  let sugEl = wrap.querySelector('.search-suggestions');
+  if (!sugEl) {
+    sugEl = document.createElement('div');
+    sugEl.className = 'search-suggestions';
+    sugEl.style.display = 'none';
+    wrap.appendChild(sugEl);
+  }
+
+  let suggestions = [];
+  let activeIndex = -1;
+  let lastQuery = '';
+
+  function renderSuggestions(list) {
+    suggestions = list || [];
+    activeIndex = -1;
+    if (!suggestions.length) {
+      sugEl.style.display = 'none';
+      sugEl.innerHTML = '';
+      return;
     }
+    sugEl.innerHTML = suggestions.map((s, i) =>
+      `<div class="suggestion-item" role="option" data-index="${i}" data-href="${escAttr(s.href)}">
+         <div class="suggestion-title">${escAttr(s.title)}</div>
+         <div class="suggestion-meta">${escAttr(s.year || '')}</div>
+         <div class="suggestion-type">${escAttr(s.type)}</div>
+       </div>`).join('');
+    sugEl.style.display = '';
+  }
+
+  function setActive(i) {
+    const items = sugEl.querySelectorAll('.suggestion-item');
+    items.forEach((it) => it.classList.remove('active'));
+    if (i >= 0 && items[i]) {
+      items[i].classList.add('active');
+      items[i].scrollIntoView({ block: 'nearest' });
+      activeIndex = i;
+    } else {
+      activeIndex = -1;
+    }
+  }
+
+  function clearSuggestions() { renderSuggestions([]); }
+
+  // Debounced search
+  let debounceTimer = null;
+  function scheduleQuery(q) {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(async () => {
+      debounceTimer = null;
+      const val = (q || '').trim();
+      if (!val) { clearSuggestions(); return; }
+      lastQuery = val;
+      try {
+        const res = await VidoraData.search(val);
+        // Merge movies and shows, prioritise movies then shows, limit 8
+        const items = [ ...(res.movies || []), ...(res.shows || []) ].slice(0, 8).map((it) => ({
+          title: it.title || it.name || '',
+          year: it.year || it.first_air_date || it.year || '',
+          href: it.mediaType === 'tv' ? `/series/${it.id}` : `/movie/${it.id}`,
+          type: it.mediaType === 'tv' ? 'Series' : 'Movie',
+        }));
+        // Only render if query hasn't changed
+        if (lastQuery === val) renderSuggestions(items);
+      } catch (err) {
+        console.error('Search suggestions failed', err);
+        clearSuggestions();
+      }
+    }, 240);
+  }
+
+  input.addEventListener('input', (e) => {
+    scheduleQuery(input.value);
+  });
+
+  // Keyboard navigation
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActive(Math.min(activeIndex + 1, suggestions.length - 1));
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActive(Math.max(activeIndex - 1, 0));
+      return;
+    }
+    if (e.key === 'Enter') {
+      if (activeIndex >= 0 && suggestions[activeIndex]) {
+        e.preventDefault();
+        closeMobileMenu();
+        navigate(suggestions[activeIndex].href);
+        clearSuggestions();
+      } else if (input.value.trim()) {
+        closeMobileMenu();
+        navigate(`/search/${encodeURIComponent(input.value.trim())}`);
+        clearSuggestions();
+      }
+      return;
+    }
+    if (e.key === 'Escape') {
+      clearSuggestions();
+      return;
+    }
+  });
+
+  // Click on suggestion
+  sugEl.addEventListener('click', (ev) => {
+    const item = ev.target.closest('.suggestion-item');
+    if (!item) return;
+    const href = item.dataset.href;
+    if (href) {
+      closeMobileMenu();
+      navigate(href);
+      clearSuggestions();
+    }
+  });
+
+  // Mouseover to set active
+  sugEl.addEventListener('mousemove', (ev) => {
+    const item = ev.target.closest('.suggestion-item');
+    if (!item) return;
+    const i = Number(item.dataset.index);
+    if (!Number.isNaN(i)) setActive(i);
+  });
+
+  // Click outside to close
+  document.addEventListener('click', (ev) => {
+    if (!wrap.contains(ev.target)) clearSuggestions();
   });
 }
 wireSearchInput(document.getElementById("searchInput"));

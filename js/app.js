@@ -691,29 +691,32 @@ const legalPages = {
   },
 };
 
-function renderLegalPage(page, token) {
-  const pageData = legalPages[page];
-  if (!pageData) {
-    return `
-      <section class="legal-page wrap">
-        <h1>Page not found</h1>
-        <p>The requested legal page does not exist. Use the footer links to navigate to Terms, Privacy, Disclaimer, Copyright, or Hosting.</p>
-      </section>
-    `;
+async function renderLegalPage(page, token) {
+  if (token !== routeToken) return;
+  if (!app.innerHTML.trim()) {
+    await renderHome(token);
+    if (token !== routeToken) return;
   }
-
-  return `
-    <section class="legal-page wrap">
-      <h1>${pageData.title}</h1>
-      <p>${pageData.intro}</p>
-      ${pageData.sections.map((section) => `
-        <div>
+  const pageData = legalPages[page];
+  const bodyHTML = `<div class="legal-modal-body">${pageData
+    ? pageData.sections.map((section) => `
+        <section>
           <h2>${section.heading}</h2>
           <p>${section.body}</p>
-        </div>
-      `).join('')}
-    </section>
-  `;
+        </section>
+      `).join('')
+    : `<p>The requested legal page does not exist. Use the footer links to open Terms, Privacy, Disclaimer, Copyright, or Hosting.</p>`}
+  </div>`;
+
+  VD.modal({
+    title: pageData ? pageData.title : 'Legal information',
+    sub: pageData ? pageData.intro : 'No legal page found.',
+    bodyHTML,
+    wide: true,
+    actions: [
+      { id: 'close', label: 'Close', variant: 'btn-primary', onClick: (close) => close() },
+    ],
+  });
 }
 
 async function renderMovieDetail(id, token) {
@@ -975,7 +978,7 @@ const routeDefinitions = [
   { pattern: "/series/:id", nav: "series", render: ({ id }, token) => renderSeriesDetail(id, null, token) },
   { pattern: "/movie/:id", nav: "", render: ({ id }, token) => renderMovieDetail(id, token) },
   { pattern: "/search/:query", nav: "", render: ({ query }, token) => renderSearch(query, token) },
-  { pattern: "/legal/:page", nav: "", render: ({ page }, token) => renderLegalPage(page, token) },
+  { pattern: "/legal/:page", nav: "", modal: true, render: ({ page }, token) => renderLegalPage(page, token) },
   { pattern: "/party/:id", nav: "", render: ({ id }) => PartyUI.renderJoinPage(app, id) },
   { pattern: "/series", nav: "series", render: (_params, token) => renderGrid("series", token) },
   { pattern: "/movies", nav: "movies", render: (_params, token) => renderGrid("movies", token) },
@@ -1037,12 +1040,12 @@ function playPageTransition() {
 
 async function route() {
   const myToken = ++routeToken;
-  window.scrollTo(0, 0);
+  const matched = matchRoute(location.pathname);
+  if (!matched || !matched.route.modal) window.scrollTo(0, 0);
   closeMobileMenu();
   stopHeroRotation();
   playPageTransition();
 
-  const matched = matchRoute(location.pathname);
   setActiveNav(matched ? matched.route.nav : "");
 
   try {

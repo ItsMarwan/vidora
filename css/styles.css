@@ -717,10 +717,38 @@ body.no-scroll { overflow: hidden; height: 100dvh; }
   background: var(--bg-elevated); border: 1px solid var(--border-hairline);
   border-radius: var(--radius-md); width: 100%; max-width: 440px; padding: 30px;
   position: relative; box-shadow: 0 30px 70px rgba(0,0,0,0.6);
+  max-height: 90vh; overflow: hidden;
 }
-.vd-modal-wide { max-width: 720px; }
+.vd-modal-wide { max-width: 760px; }
 .vd-modal h3 { font-family: var(--font-display); font-style: italic; font-weight: 600; font-size: 23px; margin: 0 0 6px; }
-.vd-modal p.sub { color: var(--text-muted); font-size: 13px; margin: 0 0 22px; line-height: 1.5; }
+.vd-modal p.sub { color: var(--text-muted); font-size: 14px; margin: 0 0 22px; line-height: 1.7; }
+.vd-modal-body {
+  max-height: calc(75vh - 120px);
+  overflow-y: auto;
+  padding-right: 12px;
+  display: grid;
+  gap: 1.6rem;
+}
+.legal-modal-body {
+  padding-right: 2px;
+}
+.legal-modal-body section {
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.04);
+  padding: 18px 18px 16px;
+}
+.legal-modal-body h2 {
+  margin: 0 0 0.85rem;
+  font-size: 18px;
+  font-family: var(--font-display);
+  color: var(--text-primary);
+}
+.legal-modal-body p {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.9;
+  font-size: 15px;
+}
 .vd-modal label { display: block; font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 7px; }
 .vd-modal input[type="text"], .vd-modal input[type="password"] {
   width: 100%; background: var(--bg-surface); border: 1px solid var(--border-hairline); color: var(--text-primary);
@@ -1310,51 +1338,91 @@ body.no-scroll { overflow: hidden; height: 100dvh; }
 
 /* ---------------- Footer ---------------- */
 .footer {
-  border-top: 1px solid var(--border-hairline);
-  padding: 36px 0 28px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 13px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  background: rgba(7,8,12,0.94);
+  color: var(--text-secondary);
+  padding: 42px 0 28px;
 }
-.footer-grid {
+.footer-inner {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 18px;
+  gap: 34px;
   max-width: 1260px;
-  margin: 0 auto 16px;
+  margin: 0 auto;
 }
-.footer-brand {
-  font-family: var(--font-display);
-  font-size: 18px;
+.footer-brand-group {
+  flex: 1.2;
+  min-width: 220px;
+}
+.footer-logo {
+  display: inline-block;
   color: var(--accent-gold);
-  margin-bottom: 8px;
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 700;
+  text-decoration: none;
+  margin-bottom: 12px;
 }
-.footer-copy,
-.footer-note {
+.footer-copy {
   margin: 0;
-  line-height: 1.6;
-  color: var(--text-secondary);
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.8;
+  max-width: 380px;
 }
-.footer-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px 18px;
-  justify-content: center;
+.footer-columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(170px, 1fr));
+  gap: 32px;
+  flex: 1.8;
 }
-.footer-links a {
+.footer-col-title {
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-bottom: 14px;
+}
+.footer-col a,
+.footer-small {
+  display: block;
   color: var(--text-muted);
   text-decoration: none;
-  transition: color 0.16s ease;
+  font-size: 14px;
+  margin-bottom: 12px;
 }
-.footer-links a:hover {
-  color: var(--text-primary);
+.footer-col a:hover {
+  color: var(--accent-gold);
 }
-.footer-note {
-  max-width: 980px;
-  margin: 0 auto;
-  padding-top: 8px;
+.footer-small {
+  max-width: 320px;
+  line-height: 1.75;
+  margin-top: 8px;
+}
+@media (max-width: 860px) {
+  .footer-inner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .footer-columns {
+    grid-template-columns: repeat(2, minmax(150px, 1fr));
+    gap: 24px;
+  }
+}
+@media (max-width: 620px) {
+  .footer {
+    padding: 30px 0 18px;
+  }
+  .footer-columns {
+    grid-template-columns: 1fr;
+  }
+  .footer-copy,
+  .footer-small {
+    max-width: none;
+  }
 }
 
 .legal-page {

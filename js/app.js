@@ -602,6 +602,120 @@ async function renderProfile(token) {
   ProfileUI.renderPage(app);
 }
 
+const legalPages = {
+  terms: {
+    title: 'Terms of Service',
+    intro: 'These terms govern use of Vidora. By browsing content, you agree to use this site responsibly and accept that Vidora is a directory interface, not a content host.',
+    sections: [
+      {
+        heading: 'Service overview',
+        body: 'Vidora provides a lightweight front-end for discovering movies and series. The site does not host or distribute media. Playback is provided by external embed providers such as Vidking and URPlayer.',
+      },
+      {
+        heading: 'User obligations',
+        body: 'Use Vidora for lawful, personal entertainment. Do not attempt to modify, scrape, or republish the site in a way that infringes intellectual property rights or harms the service.',
+      },
+      {
+        heading: 'Availability',
+        body: 'Content availability and playback quality depend on third-party sources. Vidora does not guarantee that any title will remain accessible or free of interruptions.',
+      },
+    ],
+  },
+  privacy: {
+    title: 'Privacy Policy',
+    intro: 'Vidora is designed to minimize data collection. This policy explains what is stored locally and how the site uses that information.',
+    sections: [
+      {
+        heading: 'What we store',
+        body: 'Vidora stores only browser-local preferences such as search history, favorites, and language settings. No user accounts or personal profiles are required.',
+      },
+      {
+        heading: 'No tracking',
+        body: 'The app does not include analytics, tracking cookies, or third-party advertising scripts. Search suggestions and watch history are generated locally from available metadata.',
+      },
+      {
+        heading: 'External services',
+        body: 'Playback links and external embeds may be served by third-party providers. Those providers may have their own privacy practices that are outside Vidora’s control.',
+      },
+    ],
+  },
+  disclaimer: {
+    title: 'Content Disclaimer',
+    intro: 'Vidora is an informational browsing tool for movies and shows. It does not own or license the underlying media content.',
+    sections: [
+      {
+        heading: 'No ownership claim',
+        body: 'All program names, artwork, and trademarks remain the property of their respective rights holders. Vidora only surfaces metadata and links for discovery purposes.',
+      },
+      {
+        heading: 'Use at your own risk',
+        body: 'External playback providers may change, remove, or restrict access to media at any time. Vidora is not responsible for third-party content availability or legality in your location.',
+      },
+      {
+        heading: 'Accuracy of information',
+        body: 'Metadata such as ratings, descriptions, and artwork are provided by TMDB and may not always be complete or up to date.',
+      },
+    ],
+  },
+  copyright: {
+    title: 'Copyright',
+    intro: 'Vidora respects copyright and intellectual property. This page explains ownership and your responsibilities when using the service.',
+    sections: [
+      {
+        heading: 'Intellectual property',
+        body: 'All films, series, images, titles, and descriptions displayed on Vidora are copyrighted by their owners. Vidora only displays metadata for discovery purposes.',
+      },
+      {
+        heading: 'DMCA and takedown',
+        body: 'If you believe any content or metadata on Vidora infringes your copyright, contact the site owner so it can be reviewed and removed if appropriate.',
+      },
+    ],
+  },
+  hosting: {
+    title: 'Hosting',
+    intro: 'Vidora is hosted as a lightweight web app and relies on a small proxy backend for TMDB requests. This page describes hosting and server behavior.',
+    sections: [
+      {
+        heading: 'Platform',
+        body: 'Vidora is served as a static site with a minimal API proxy for TMDB. The front-end runs entirely in the browser after the page loads.',
+      },
+      {
+        heading: 'Server data',
+        body: 'The backend only forwards requests to TMDB and does not store personal user data. The app itself does not collect or retain identifiable information.',
+      },
+      {
+        heading: 'External providers',
+        body: 'Playback is handled by external embed providers. Their hosting, content delivery, and privacy practices are separate from Vidora.',
+      },
+    ],
+  },
+};
+
+function renderLegalPage(page, token) {
+  const pageData = legalPages[page];
+  if (!pageData) {
+    return `
+      <section class="legal-page wrap">
+        <h1>Page not found</h1>
+        <p>The requested legal page does not exist. Use the footer links to navigate to Terms, Privacy, Disclaimer, Copyright, or Hosting.</p>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="legal-page wrap">
+      <h1>${pageData.title}</h1>
+      <p>${pageData.intro}</p>
+      ${pageData.sections.map((section) => `
+        <div>
+          <h2>${section.heading}</h2>
+          <p>${section.body}</p>
+        </div>
+      `).join('')}
+    </section>
+  `;
+}
+
 async function renderMovieDetail(id, token) {
   app.innerHTML = loadingState();
   const m = await VidoraData.movieDetails(id);
@@ -861,6 +975,7 @@ const routeDefinitions = [
   { pattern: "/series/:id", nav: "series", render: ({ id }, token) => renderSeriesDetail(id, null, token) },
   { pattern: "/movie/:id", nav: "", render: ({ id }, token) => renderMovieDetail(id, token) },
   { pattern: "/search/:query", nav: "", render: ({ query }, token) => renderSearch(query, token) },
+  { pattern: "/legal/:page", nav: "", render: ({ page }, token) => renderLegalPage(page, token) },
   { pattern: "/party/:id", nav: "", render: ({ id }) => PartyUI.renderJoinPage(app, id) },
   { pattern: "/series", nav: "series", render: (_params, token) => renderGrid("series", token) },
   { pattern: "/movies", nav: "movies", render: (_params, token) => renderGrid("movies", token) },

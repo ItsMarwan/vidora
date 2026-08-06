@@ -372,16 +372,14 @@ body.no-scroll { overflow: hidden; height: 100dvh; }
   position: absolute;
   left: 0;
   right: 0;
-   top: calc(100% + 2px);
-   z-index: 50;
-   background: var(--bg-elevated);
-   border: 1px solid var(--border-hairline);
-   border-top: none;
-   box-shadow: 0 18px 42px rgba(0,0,0,0.65);
-   max-height: 360px;
-   overflow: auto;
-   border-bottom-left-radius: 14px;
-   border-bottom-right-radius: 14px;
+  top: calc(100% + 2px);
+  z-index: 50;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-hairline);
+  box-shadow: 0 18px 42px rgba(0,0,0,0.65);
+  max-height: 360px;
+  overflow: auto;
+  border-radius: 14px;
  }
  .search-suggestions .suggestion-item {
    display: flex;
@@ -1313,11 +1311,79 @@ body.no-scroll { overflow: hidden; height: 100dvh; }
 /* ---------------- Footer ---------------- */
 .footer {
   border-top: 1px solid var(--border-hairline);
-  padding: 32px;
-  text-align: center;
+  padding: 36px 0 28px;
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
+}
+.footer-grid {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 18px;
+  max-width: 1260px;
+  margin: 0 auto 16px;
+}
+.footer-brand {
+  font-family: var(--font-display);
+  font-size: 18px;
+  color: var(--accent-gold);
+  margin-bottom: 8px;
+}
+.footer-copy,
+.footer-note {
+  margin: 0;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 18px;
+  justify-content: center;
+}
+.footer-links a {
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 0.16s ease;
+}
+.footer-links a:hover {
+  color: var(--text-primary);
+}
+.footer-note {
+  max-width: 980px;
+  margin: 0 auto;
+  padding-top: 8px;
+}
+
+.legal-page {
+  padding: 52px 0 72px;
+}
+.legal-page h1 {
+  margin-bottom: 12px;
+  font-size: 32px;
+  letter-spacing: -0.03em;
+}
+.legal-page h2 {
+  margin-top: 36px;
+  margin-bottom: 12px;
+  font-size: 20px;
+}
+.legal-page p,
+.legal-page li {
+  color: var(--text-secondary);
+  line-height: 1.75;
+}
+.legal-page ul {
+  margin: 14px 0 24px 1.1rem;
+}
+.legal-page a {
+  color: var(--accent-gold);
+  text-decoration: none;
+}
+.legal-page a:hover {
+  text-decoration: underline;
 }
 
 /* ---------------- Responsive ---------------- */

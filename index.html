@@ -45,7 +45,7 @@
         <div class="nav-search" id="navSearch" role="search">
           <label for="searchInput" class="sr-only">Search movies &amp; series</label>
           <span class="nav-search-icon" data-icon="search" data-icon-size="16" aria-hidden="true"></span>
-          <input type="search" id="searchInput" placeholder="Search movies &amp; series…" enterkeyhint="search" />
+          <input type="search" id="searchInput" placeholder="Search movies &amp; series…" autocomplete="off" autocapitalize="off" spellcheck="false" />
         </div>
         <!-- <div class="lang-switch" id="langSwitch" role="group" aria-label="Player language">
           <button type="button" class="lang-switch-btn" data-lang-btn="en" aria-pressed="true" aria-label="English — Vidking player" title="English (Vidking player)">
@@ -97,7 +97,7 @@
       <div class="mobile-menu-search" role="search">
         <label for="mobileSearchInput" class="sr-only">Search movies &amp; series</label>
         <!-- <span class="nav-search-icon" data-icon="search" data-icon-size="17" aria-hidden="true"></span> -->
-        <input type="search" id="mobileSearchInput" placeholder="Search movies &amp; series…" enterkeyhint="search" />
+        <input type="search" id="mobileSearchInput" placeholder="Search movies &amp; series…" autocomplete="off" autocapitalize="off" spellcheck="false" />
       </div>
 
       <nav aria-label="Mobile" class="mobile-menu-links">
@@ -136,7 +136,20 @@
     <main id="app" tabindex="-1"></main>
 
     <footer class="footer">
-      Vidora · playback powered by the Vidking &amp; URPlayer embed APIs
+      <div class="wrap footer-grid">
+        <div>
+          <div class="footer-brand">Vidora</div>
+          <p class="footer-copy">A lightweight browse-first experience for movies and series. No signup required.</p>
+        </div>
+        <div class="footer-links">
+          <a href="/legal/terms">Terms of Service</a>
+          <a href="/legal/privacy">Privacy Policy</a>
+          <a href="/legal/disclaimer">Content Disclaimer</a>
+          <a href="/legal/copyright">Copyright</a>
+          <a href="/legal/hosting">Hosting</a>
+        </div>
+      </div>
+      <p class="footer-note">This site provides a searchable front-end and uses external embed providers for playback. Content availability and ownership remain with their rights holders.</p>
     </footer>
 
     <script src="js/hash-redirect.js"></script>

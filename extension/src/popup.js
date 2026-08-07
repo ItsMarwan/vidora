@@ -20,11 +20,12 @@ const clearSavedBtn = document.getElementById('clearSavedBtn');
 document.addEventListener('DOMContentLoaded', () => {
   loadSavedMovies();
 
-  searchBtn?.addEventListener('click', handleSearch);
-  saveBtn?.addEventListener('click', handleSaveCurrentMedia);
-  clearSavedBtn?.addEventListener('click', clearAllSaved);
+  // Safe binding with optional chaining (?.)
+  document.getElementById('searchBtn')?.addEventListener('click', handleSearch);
+  document.getElementById('saveBtn')?.addEventListener('click', handleSaveCurrentMedia);
+  document.getElementById('clearSavedBtn')?.addEventListener('click', clearAllSaved);
 
-  searchInput?.addEventListener('keypress', (e) => {
+  document.getElementById('searchInput')?.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') handleSearch();
   });
 

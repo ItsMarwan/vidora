@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <title>Vidora Helper</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <h2>Vidora Helper</h2>
+    
+    <div class="search-box">
+      <input type="text" id="searchInput" placeholder="Search Arabic movie/series..." />
+      <button id="searchBtn">Search</button>
+    </div>
+
+    <div id="status" class="status"></div>
+    <div id="resultsList" class="results-list"></div>
+
+    <!-- Active Stream Resolution Buttons -->
+    <div id="streamSection" class="stream-section hidden">
+      <div class="stream-header">
+        <h3 id="selectedTitle"></h3>
+        <button id="saveBtn" class="btn-icon" title="Save Movie">⭐ Save</button>
+      </div>
+      <div id="qualityButtons" class="quality-buttons"></div>
+    </div>
+
+    <!-- Saved Movies Library -->
+    <div class="saved-section">
+      <div class="saved-title">
+        <span>⭐ Saved Movies</span>
+        <button id="clearSavedBtn" class="btn-text">Clear All</button>
+      </div>
+      <div id="savedList" class="saved-list"></div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

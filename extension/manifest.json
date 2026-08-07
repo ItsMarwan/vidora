@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "Vidora Helper",
+  "version": "1.2",
+  "description": "Arabic stream extractor, saved library, and player injector for Vidora TV.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "declarativeNetRequest"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "akwam_referer_rules",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://vidora-tv.vercel.app/*",
+        "*://localhost/*",
+        "*://localhost:*/*",
+        "*://127.0.0.1/*",
+        "*://127.0.0.1:*/*"
+      ],
+      "js": ["content.js"]
+    }
+  ]
+}

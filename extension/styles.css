@@ -1,0 +1,186 @@
+body {
+  width: 340px;
+  font-family: system-ui, -apple-system, sans-serif;
+  background-color: #0b1329;
+  color: #f8fafc;
+  margin: 0;
+  padding: 12px;
+  direction: rtl;
+}
+
+.container h2 {
+  font-size: 16px;
+  margin: 0 0 10px 0;
+  text-align: center;
+  color: #38bdf8;
+}
+
+.search-box {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+input {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  background: #1e293b;
+  color: #fff;
+  outline: none;
+}
+
+button#searchBtn {
+  padding: 8px 12px;
+  background: #0284c7;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.status {
+  font-size: 12px;
+  color: #38bdf8;
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.results-list {
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.result-item {
+  padding: 8px;
+  background: #1e293b;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.result-item:hover {
+  background: #334155;
+}
+
+.hidden {
+  display: none;
+}
+
+.stream-section {
+  border-top: 1px solid #1e293b;
+  padding-top: 8px;
+  margin-top: 8px;
+}
+
+.stream-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.stream-header h3 {
+  font-size: 13px;
+  margin: 0;
+  color: #f8fafc;
+}
+
+.btn-icon {
+  background: #334155;
+  color: #fbbf24;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.quality-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.quality-btn {
+  flex: 1;
+  padding: 8px;
+  background: #16a34a;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.saved-section {
+  border-top: 1px solid #1e293b;
+  margin-top: 12px;
+  padding-top: 8px;
+}
+
+.saved-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}
+
+.btn-text {
+  background: none;
+  border: none;
+  color: #ef4444;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.saved-list {
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.saved-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  background: #1e293b;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.saved-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.btn-play-saved {
+  background: #0284c7;
+  color: white;
+  border: none;
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.btn-del-saved {
+  background: #ef4444;
+  color: white;
+  border: none;
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.empty-saved {
+  font-size: 11px;
+  color: #64748b;
+  text-align: center;
+}

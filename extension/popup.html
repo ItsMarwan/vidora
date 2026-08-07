@@ -1,41 +1,54 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Vidora Helper</title>
-  <link rel="stylesheet" href="styles.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vidora media helper</title>
+  <link rel="stylesheet" href="popup.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2222%22 fill=%22%230a0a0c%22/><text x=%2250%22 y=%2266%22 font-size=%2258%22 text-anchor=%22middle%22 fill=%22%23e8b84b%22 font-family=%22Georgia%22 font-style=%22italic%22>V</text></svg>">
 </head>
 <body>
-  <div class="container">
-    <h2>Vidora Helper</h2>
-    
+  <div class="extension-container">
+    <header class="header">
+      <div class="brand">
+        <span>Vid<span class="dot">ora</span></span>
+      </div>
+      <span class="badge">ARABIC MEDIA HELPER</span>
+    </header>
+
     <div class="search-box">
-      <input type="text" id="searchInput" placeholder="Search Arabic movie/series..." />
-      <button id="searchBtn">Search</button>
-    </div>
-
-    <div id="status" class="status"></div>
-    <div id="resultsList" class="results-list"></div>
-
-    <!-- Active Stream Resolution Buttons -->
-    <div id="streamSection" class="stream-section hidden">
-      <div class="stream-header">
-        <h3 id="selectedTitle"></h3>
-        <button id="saveBtn" class="btn-icon" title="Save Movie">⭐ Save</button>
+      <div class="input-wrapper">
+        <svg class="search-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input id="searchInput" placeholder="Search Akwam database..." />
       </div>
-      <div id="qualityButtons" class="quality-buttons"></div>
     </div>
 
-    <!-- Saved Movies Library -->
-    <div class="saved-section">
-      <div class="saved-title">
-        <span>⭐ Saved Movies</span>
-        <button id="clearSavedBtn" class="btn-text">Clear All</button>
+    <div id="statusDiv" class="status-msg"></div>
+
+    <main class="content">
+      <div id="streamSection" class="stream-section hidden">
+        <div class="stream-header">
+          <span id="selectedTitle" class="selected-title"></span>
+          <button id="saveBtn" class="btn-save">⭐ Save</button>
+        </div>
+        <div id="qualityButtons" class="quality-grid"></div>
       </div>
-      <div id="savedList" class="saved-list"></div>
-    </div>
+
+      <div class="section-head">
+        <span class="section-title">Search Results</span>
+      </div>
+      <div class="movie-list" id="resultsList"></div>
+
+      <div class="section-head" style="margin-top: 14px;">
+        <span class="section-title">Saved Streams</span>
+        <button id="clearSavedBtn" class="btn-text-action">Clear All</button>
+      </div>
+      <div class="saved-list" id="savedList"></div>
+    </main>
   </div>
-
   <script src="popup.js"></script>
 </body>
 </html>

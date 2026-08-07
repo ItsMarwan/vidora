@@ -4,9 +4,10 @@ const parser = new DOMParser();
 let currentMediaItem = null;
 let currentStreams = [];
 
+// DOM Element References
 const searchInput = document.getElementById('searchInput');
 const searchBtn = document.getElementById('searchBtn');
-const statusDiv = document.getElementById('status');
+const statusDiv = document.getElementById('statusDiv');
 const resultsList = document.getElementById('resultsList');
 const streamSection = document.getElementById('streamSection');
 const selectedTitle = document.getElementById('selectedTitle');
@@ -15,13 +16,27 @@ const saveBtn = document.getElementById('saveBtn');
 const savedList = document.getElementById('savedList');
 const clearSavedBtn = document.getElementById('clearSavedBtn');
 
-// Initialize
-document.addEventListener('DOMContentLoaded', loadSavedMovies);
-searchBtn.addEventListener('click', handleSearch);
-saveBtn.addEventListener('click', handleSaveCurrentMedia);
-clearSavedBtn.addEventListener('click', clearAllSaved);
-searchInput.addEventListener('keypress', (e) => {
-  if (e.key === 'Enter') handleSearch();
+// Consolidated Initialization
+document.addEventListener('DOMContentLoaded', () => {
+  loadSavedMovies();
+
+  searchBtn?.addEventListener('click', handleSearch);
+  saveBtn?.addEventListener('click', handleSaveCurrentMedia);
+  clearSavedBtn?.addEventListener('click', clearAllSaved);
+
+  searchInput?.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') handleSearch();
+  });
+
+  // Delegation listener for TMDB extension cards
+  document.body.addEventListener('click', (e) => {
+    const card = e.target.closest('[data-tmdb-id]');
+    if (!card) return;
+
+    const tmdbId = card.dataset.tmdbId;
+    const isWatchClick = Boolean(e.target.closest('.btn-watch'));
+    selectMovieInActiveTab(tmdbId, isWatchClick);
+  });
 });
 
 async function handleSearch() {
@@ -180,16 +195,23 @@ function renderQualityButtons(streams) {
         return;
       }
 
-      chrome.tabs.sendMessage(tab.id, {
-        action: "INJECT_STREAM",
-        streamUrl: stream.streamUrl,
-        quality: stream.quality
-      }, (response) => {
-        if (chrome.runtime.lastError || !response || response.status !== "success") {
-          statusDiv.textContent = "⚠️ Please REFRESH your Vidora webpage tab and try again!";
-        } else {
-          statusDiv.textContent = `✅ Playing ${stream.quality} on Vidora!`;
-        }
+      chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['mediaplayer.js']
+      }, () => {
+        chrome.tabs.sendMessage(tab.id, {
+          action: "INJECT_VIDORA_PLAYER",
+          movie: {
+            title: `${currentMediaItem.title} (${stream.quality})`,
+            src: stream.streamUrl
+          }
+        }, (response) => {
+          if (chrome.runtime.lastError || !response || response.status !== "success") {
+            statusDiv.textContent = "⚠️ Tab non-responsive. Try refreshing the active page.";
+          } else {
+            statusDiv.textContent = `✅ Playing ${stream.quality} on Vidora!`;
+          }
+        });
       });
     };
 
@@ -197,7 +219,6 @@ function renderQualityButtons(streams) {
   });
 }
 
-// Storage / Saved Movies Logic
 async function handleSaveCurrentMedia() {
   if (!currentMediaItem || currentStreams.length === 0) return;
 
@@ -225,7 +246,7 @@ async function loadSavedMovies() {
   savedList.innerHTML = '';
 
   if (savedMovies.length === 0) {
-    savedList.innerHTML = '<div class="empty-saved">No saved movies yet.</div>';
+    savedList.innerHTML = '<div style="color:var(--text-muted); font-size:11px;">No saved streams.</div>';
     return;
   }
 
@@ -233,11 +254,9 @@ async function loadSavedMovies() {
     const div = document.createElement('div');
     div.className = 'saved-item';
     div.innerHTML = `
-      <div class="saved-info">
-        <strong>${item.title}</strong> ${item.year ? `(${item.year})` : ''}
-      </div>
+      <span><strong>${item.title}</strong></span>
       <div class="saved-actions">
-        <button class="btn-play-saved">▶ Select</button>
+        <button class="btn-play-saved">Select</button>
         <button class="btn-del-saved">✕</button>
       </div>
     `;
@@ -248,7 +267,7 @@ async function loadSavedMovies() {
       selectedTitle.textContent = item.title;
       streamSection.classList.remove('hidden');
       renderQualityButtons(item.streams);
-      statusDiv.textContent = `Loaded "${item.title}" from saved list.`;
+      statusDiv.textContent = `Loaded "${item.title}"`;
     };
 
     div.querySelector('.btn-del-saved').onclick = async () => {
@@ -264,6 +283,35 @@ async function loadSavedMovies() {
 async function clearAllSaved() {
   await chrome.storage.local.remove('savedMovies');
   loadSavedMovies();
+}
+
+// Dispatch TMDB selection to the active browser tab
+async function selectMovieInActiveTab(tmdbId, watchMode = false) {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return;
+
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: "MAIN",
+      func: (id, isWatch) => {
+        if (typeof window.selectMovieFromExtension === "function") {
+          window.selectMovieFromExtension(id, isWatch);
+        } else {
+          window.postMessage({
+            type: "VIDORA_SELECT_MOVIE",
+            tmdbId: id,
+            watch: isWatch
+          }, "*");
+        }
+      },
+      args: [tmdbId, watchMode]
+    });
+
+    window.close();
+  } catch (err) {
+    console.error("Failed to dispatch movie selection to active tab:", err);
+  }
 }
 
 function resetUI() {

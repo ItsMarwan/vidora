@@ -1,39 +1,22 @@
 {
   "manifest_version": 3,
-  "name": "Vidora Helper",
-  "version": "1.2",
-  "description": "Arabic stream extractor, saved library, and player injector for Vidora TV.",
+  "name": "Vidora Stream Extractor",
+  "version": "1.0",
+  "description": "Extract and play direct media streams with Vidora custom player.",
   "permissions": [
     "activeTab",
     "scripting",
-    "storage",
-    "declarativeNetRequest"
+    "storage"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "https://*.akwam.it/*",
+    "https://akwam.it/*"
   ],
-  "declarative_net_request": {
-    "rule_resources": [
-      {
-        "id": "akwam_referer_rules",
-        "enabled": true,
-        "path": "rules.json"
-      }
-    ]
+  "icons": {
+    "128": "icons/icon.svg"
   },
   "action": {
-    "default_popup": "popup.html"
-  },
-  "content_scripts": [
-    {
-      "matches": [
-        "*://vidora-tv.vercel.app/*",
-        "*://localhost/*",
-        "*://localhost:*/*",
-        "*://127.0.0.1/*",
-        "*://127.0.0.1:*/*"
-      ],
-      "js": ["content.js"]
-    }
-  ]
+    "default_popup": "popup.html",
+    "default_icon": "icons/icon.svg"
+  }
 }

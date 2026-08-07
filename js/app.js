@@ -441,6 +441,25 @@ window.addEventListener("mouseup", () => {
   rowDrag = null;
 });
 
+// Listen for movie pick events dispatched from the browser extension
+window.addEventListener("message", async (event) => {
+  // Validate action payload from extension
+  if (!event.data || event.data.type !== "VIDORA_SELECT_MOVIE") return;
+
+  const { tmdbId, watch = false } = event.data;
+  if (!tmdbId) return;
+
+  // Route to either detail page or watch mode with the fresh TMDB ID
+  const targetPath = watch ? `/watch/movie/${tmdbId}` : `/movie/${tmdbId}`;
+  navigate(targetPath);
+});
+
+// Helper method exposed globally for direct extension script calls
+window.selectMovieFromExtension = function(tmdbId, watch = false) {
+  const targetPath = watch ? `/watch/movie/${tmdbId}` : `/movie/${tmdbId}`;
+  navigate(targetPath);
+};
+
 let rowScrollerCleanups = [];
 function teardownRowScrollers() {
   rowScrollerCleanups.forEach((fn) => { try { fn(); } catch (err) {} });
@@ -723,7 +742,14 @@ async function renderMovieDetail(id, token) {
   app.innerHTML = loadingState();
   const m = await VidoraData.movieDetails(id);
   if (token !== routeToken) return;
-  if (!m) { app.innerHTML = emptyState("Not found", "That title isn't available."); return; }
+  if (!m) { 
+    app.innerHTML = emptyState("Not found", "That title isn't available."); 
+    return; 
+  }
+
+  // Set the browser tab title dynamically from TMDB data
+  document.title = `${m.title} (${m.year || ""}) - Vidora`;
+
   app.innerHTML = `
     <section class="detail-hero" style="background-image:url('${m.backdrop}')">
       ${heroBackButton("/movies")}
@@ -732,7 +758,12 @@ async function renderMovieDetail(id, token) {
       <div class="detail-poster">${thumbImg(m.poster, m.title, { w: 500, h: 750 })}</div>
       <div class="detail-main">
         <h1 class="detail-title">${m.title}</h1>
-        <div class="detail-meta">${starRow(m.rating)}<span>${m.year || ""}</span>${m.runtime ? `<span>${m.runtime} min</span>` : ""}${m.certification ? `<span class="cert-badge">${escAttr(m.certification)}</span>` : ""}</div>
+        <div class="detail-meta">
+          ${starRow(m.rating)}
+          <span>${m.year || ""}</span>
+          ${m.runtime ? `<span>${m.runtime} min</span>` : ""}
+          ${m.certification ? `<span class="cert-badge">${escAttr(m.certification)}</span>` : ""}
+        </div>
         <div class="genre-tags">${(m.genres || []).map((g) => `<span class="genre-tag">${g}</span>`).join("")}</div>
         ${m.certificationDescription ? `<div class="detail-rating-desc">${escAttr(m.certificationDescription)}</div>` : ""}
         ${m.guideUrl ? `<a class="detail-guide-link" href="${escAttr(m.guideUrl)}" target="_blank" rel="noopener">IMDb parental guide</a>` : ""}
@@ -746,6 +777,7 @@ async function renderMovieDetail(id, token) {
       </div>
     </div>
     <div id="relatedRow"></div>`;
+
   wireBackButtons(app);
   wireDetailActions(app, m, VidoraData.movieTrailerKey(m.id), token);
   paintRelatedRow(document.getElementById("relatedRow"), m, token);

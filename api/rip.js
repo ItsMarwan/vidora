@@ -31,6 +31,13 @@ export default async function handler(req, res) {
       return mm ? mm[1] || mm[0] : null;
     }
 
+    // base headers likely required to fetch segments
+    const headers = {
+      referer: u.toString(),
+      origin: u.origin,
+      'user-agent': req.headers['user-agent'] || 'Vidora/1.0',
+    };
+
     // 1) raw URL
     let streamUrl = firstMatch(/(https?:\/\/[^"'<>\s]+\.m3u8[^"'<>\s]*)/i, text);
 
@@ -127,12 +134,7 @@ export default async function handler(req, res) {
       return res.status(404).json({ error: 'No m3u8 found' });
     }
 
-    // headers likely required to fetch segments
-    const headers = {
-      referer: u.toString(),
-      origin: u.origin,
-      'user-agent': req.headers['user-agent'] || 'Vidora/1.0',
-    };
+    // (headers already defined above)
 
     // store in KV under short token
     const token = `rip_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;

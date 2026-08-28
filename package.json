@@ -9,6 +9,8 @@
     "dev:vercel": "npx vercel dev --listen 3000 --local"
   },
   "dependencies": {
-    "@vercel/kv": "^2.0.0"
+    "@vercel/kv": "^2.0.0",
+    "playwright": "^1.62.1",
+    "playwright-chromium": "^1.62.1"
   }
 }

@@ -80,6 +80,50 @@ export default async function handler(req, res) {
 
     if (!streamUrl) {
       console.log('[rip] no m3u8 found in embed or iframe; returning 404');
+      // As a last resort, try a headless browser to let embed JS run and
+      // observe network requests for an m3u8. This requires Playwright to
+      // be installed in the deployment environment. If it's not present,
+      // return 404 but indicate Playwright is missing for debugging.
+      try {
+        const { chromium } = await import('playwright');
+        console.log('[rip] launching headless browser to observe network');
+        const browser = await chromium.launch({ args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+        const page = await browser.newPage();
+        let found = null;
+        page.on('response', async (response) => {
+          try {
+            const url = response.url();
+            if (/\.m3u8(\?|$)/i.test(url) && !found) {
+              found = { url, headers: response.headers() };
+              console.log('[rip] playwright captured m3u8', url);
+            }
+          } catch (e) {}
+        });
+        await page.goto(u.toString(), { waitUntil: 'networkidle', timeout: 10000 }).catch(() => {});
+        // wait up to 6s for any m3u8 requests
+        const startWait = Date.now();
+        while (!found && Date.now() - startWait < 6000) {
+          // small sleep
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise((r) => setTimeout(r, 200));
+        }
+        if (found) {
+          streamUrl = found.url;
+          // merge headers captured; prefer captured headers
+          const headersCaptured = Object.assign({}, found.headers || {});
+          const headersFinal = Object.assign({}, headers, headersCaptured);
+          await browser.close();
+          const token2 = `rip_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+          await kv.set(`rip:${token2}`, JSON.stringify({ streamUrl, headers: headersFinal }), { ex: 300 });
+          console.log('[rip] stored token via playwright', token2);
+          return res.status(200).json({ proxiedUrl: `/api/proxy?token=${encodeURIComponent(token2)}`, streamUrl, headers: headersFinal });
+        }
+        await browser.close();
+        console.log('[rip] playwright did not observe m3u8');
+      } catch (playErr) {
+        console.log('[rip] playwright not available or failed:', playErr && playErr.message);
+        // fallthrough to 404
+      }
       return res.status(404).json({ error: 'No m3u8 found' });
     }
 

@@ -926,7 +926,11 @@ async function renderWatchMovie(id, token) {
 
   const playerShim = {
     _src: null,
-    set src(val) { this._src = val; handleEmbedSrc(val); },
+    set src(val) {
+      if (this._src === val) return;
+      this._src = val;
+      handleEmbedSrc(val);
+    },
     get src() { return this._src; }
   };
 
@@ -936,56 +940,24 @@ async function renderWatchMovie(id, token) {
     buildSrc: (t, autoplay) => VidoraPlayer.movieUrl(id, t, autoplay),
   });
 
-  function handleEmbedSrc(embedUrl) {
+  async function handleEmbedSrc(embedUrl) {
     if (!embedUrl) return;
-    const probeId = 'vidora-hidden-probe';
-    const existing = document.getElementById(probeId);
-    if (existing) existing.remove();
-
-    let done = false;
-    const iframe = document.createElement('iframe');
-    iframe.id = probeId;
-    iframe.setAttribute('sandbox', 'allow-scripts allow-forms');
-    iframe.setAttribute('title', 'Vidora stream probe');
-    Object.assign(iframe.style, {
-      position: 'absolute',
-      width: '1px',
-      height: '1px',
-      opacity: '0',
-      pointerEvents: 'none',
-      border: '0',
-      left: '-9999px',
-      top: '-9999px',
-      visibility: 'hidden'
-    });
-
-    const cleanup = () => {
-      if (done) return;
-      done = true;
-      window.removeEventListener('message', onMessage);
-      iframe.remove();
-    };
-
-    const onMessage = (event) => {
-      let data = event.data;
-      if (typeof data === 'string') {
-        try { data = JSON.parse(data); } catch { return; }
+    try {
+      const r = await fetch(`/api/rip?embed=${encodeURIComponent(embedUrl)}`);
+      const j = await r.json();
+      const streamUrl = j.proxiedUrl || j.streamUrl;
+      if (!streamUrl) {
+        console.warn('No stream URL resolved for embed', embedUrl, j);
+        return;
       }
-      if (!data || data.type !== 'RIP_DETECTED' || !data.url) return;
-      cleanup();
-      const headers = data.headers || {};
-      const streamUrl = String(data.url);
       const startTime = Number(new URL(embedUrl).searchParams.get('progress')) || 0;
       const autoplay = String(new URL(embedUrl).searchParams.get('autoPlay')) === 'true';
       if (window.injectCustomPlayer) {
-        window.injectCustomPlayer({ src: streamUrl, poster: m.poster, headers }, { startTime, autoplay });
+        window.injectCustomPlayer({ src: streamUrl, poster: m.poster, headers: j.headers || {} }, { startTime, autoplay });
       }
-    };
-
-    window.addEventListener('message', onMessage);
-    document.body.appendChild(iframe);
-    iframe.src = embedUrl;
-    setTimeout(cleanup, 20000);
+    } catch (err) {
+      console.error('embed rip failed', err);
+    }
   }
 
   handleEmbedSrc(src);
@@ -1033,7 +1005,11 @@ async function renderWatchSeries(id, season, episode, token) {
 
   const playerShim = {
     _src: null,
-    set src(val) { this._src = val; handleEmbedSrc(val); },
+    set src(val) {
+      if (this._src === val) return;
+      this._src = val;
+      handleEmbedSrc(val);
+    },
     get src() { return this._src; }
   };
 
@@ -1043,56 +1019,24 @@ async function renderWatchSeries(id, season, episode, token) {
     buildSrc: (t, autoplay) => VidoraPlayer.tvUrl(id, season, episode, t, autoplay),
   });
 
-  function handleEmbedSrc(embedUrl) {
+  async function handleEmbedSrc(embedUrl) {
     if (!embedUrl) return;
-    const probeId = 'vidora-hidden-probe';
-    const existing = document.getElementById(probeId);
-    if (existing) existing.remove();
-
-    let done = false;
-    const iframe = document.createElement('iframe');
-    iframe.id = probeId;
-    iframe.setAttribute('sandbox', 'allow-scripts allow-forms');
-    iframe.setAttribute('title', 'Vidora stream probe');
-    Object.assign(iframe.style, {
-      position: 'absolute',
-      width: '1px',
-      height: '1px',
-      opacity: '0',
-      pointerEvents: 'none',
-      border: '0',
-      left: '-9999px',
-      top: '-9999px',
-      visibility: 'hidden'
-    });
-
-    const cleanup = () => {
-      if (done) return;
-      done = true;
-      window.removeEventListener('message', onMessage);
-      iframe.remove();
-    };
-
-    const onMessage = (event) => {
-      let data = event.data;
-      if (typeof data === 'string') {
-        try { data = JSON.parse(data); } catch { return; }
+    try {
+      const r = await fetch(`/api/rip?embed=${encodeURIComponent(embedUrl)}`);
+      const j = await r.json();
+      const streamUrl = j.proxiedUrl || j.streamUrl;
+      if (!streamUrl) {
+        console.warn('No stream URL resolved for embed', embedUrl, j);
+        return;
       }
-      if (!data || data.type !== 'RIP_DETECTED' || !data.url) return;
-      cleanup();
-      const headers = data.headers || {};
-      const streamUrl = String(data.url);
       const startTime = Number(new URL(embedUrl).searchParams.get('progress')) || 0;
       const autoplay = String(new URL(embedUrl).searchParams.get('autoPlay')) === 'true';
       if (window.injectCustomPlayer) {
-        window.injectCustomPlayer({ src: streamUrl, poster: s.poster, headers }, { startTime, autoplay });
+        window.injectCustomPlayer({ src: streamUrl, poster: s.poster, headers: j.headers || {} }, { startTime, autoplay });
       }
-    };
-
-    window.addEventListener('message', onMessage);
-    document.body.appendChild(iframe);
-    iframe.src = embedUrl;
-    setTimeout(cleanup, 20000);
+    } catch (err) {
+      console.error('embed rip failed', err);
+    }
   }
 
   handleEmbedSrc(src);

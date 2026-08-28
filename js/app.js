@@ -912,7 +912,7 @@ async function renderWatchMovie(id, token) {
         <span class="player-title">${m.title}</span>
       </div>
       <div class="player-frame-wrap">
-        <iframe src="${src}" allowfullscreen allow="autoplay; fullscreen"></iframe>
+        <div id="player-host-placeholder"></div>
       </div>
       ${playerDetailsBlock(m, [
         { icon: VD.icon("save", { size: 15 }), label: "Progress is saved automatically as you watch" },
@@ -924,11 +924,39 @@ async function renderWatchMovie(id, token) {
 
   VidoraPlayer.init({ id, title: m.title, mediaType: "movie", poster: m.poster }, VidoraParty.createHostSync());
 
+  // player shim that PartyUI will talk to via `.src` assignments
+  const playerShim = {
+    _src: null,
+    set src(val) { this._src = val; handleEmbedSrc(val); },
+    get src() { return this._src; }
+  };
+
   PartyUI.mount(document.getElementById("partyContainer"), {
     mediaType: "movie", id, title: m.title, poster: m.poster,
-    getIframe: () => document.querySelector(".player-frame-wrap iframe"),
+    getIframe: () => playerShim,
     buildSrc: (t, autoplay) => VidoraPlayer.movieUrl(id, t, autoplay),
   });
+
+  // initial load via rip+proxy → inject custom player
+  async function handleEmbedSrc(embedUrl) {
+    if (!embedUrl) return;
+    try {
+      const r = await fetch(`/api/rip?embed=${encodeURIComponent(embedUrl)}`);
+      const j = await r.json();
+      const proxied = j.proxiedUrl || (j.streamUrl ? `/api/proxy?token=${encodeURIComponent(j.streamUrl)}` : null);
+      if (!proxied) {
+        console.warn('No proxied URL from rip');
+        return;
+      }
+      // opts: try to extract progress/autoplay from embedUrl query
+      let startTime = 0; let autoplay = false;
+      try { const u = new URL(embedUrl); startTime = Number(u.searchParams.get('progress')) || 0; autoplay = (u.searchParams.get('autoPlay') === 'true' || u.searchParams.get('autoplay') === '1'); } catch {}
+      if (window.injectCustomPlayer) window.injectCustomPlayer({ src: proxied, poster: m.poster }, { startTime, autoplay });
+    } catch (err) { console.error('embed rip failed', err); }
+  }
+
+  // kick off initial load
+  handleEmbedSrc(src);
 
   if (!partyState) offerResume(progress, (t) => VidoraPlayer.movieUrl(id, t, true));
 }
@@ -956,7 +984,7 @@ async function renderWatchSeries(id, season, episode, token) {
         <span class="player-title">${s.title} · S${season}E${episode}${ep ? " — " + ep.name : ""}</span>
       </div>
       <div class="player-frame-wrap">
-        <iframe src="${src}" allowfullscreen allow="autoplay; fullscreen"></iframe>
+        <div id="player-host-placeholder"></div>
       </div>
       ${playerDetailsBlock(
         { rating: s.rating, year: s.year, genres: s.genres, runtime: ep && ep.runtime, overview: (ep && ep.overview) || s.overview },
@@ -971,11 +999,32 @@ async function renderWatchSeries(id, season, episode, token) {
 
   VidoraPlayer.init({ id, title: s.title, mediaType: "tv", poster: s.poster, season, episode }, VidoraParty.createHostSync());
 
+  const playerShim = {
+    _src: null,
+    set src(val) { this._src = val; handleEmbedSrc(val); },
+    get src() { return this._src; }
+  };
+
   PartyUI.mount(document.getElementById("partyContainer"), {
     mediaType: "tv", id, season, episode, title: s.title, poster: s.poster,
-    getIframe: () => document.querySelector(".player-frame-wrap iframe"),
+    getIframe: () => playerShim,
     buildSrc: (t, autoplay) => VidoraPlayer.tvUrl(id, season, episode, t, autoplay),
   });
+
+  async function handleEmbedSrc(embedUrl) {
+    if (!embedUrl) return;
+    try {
+      const r = await fetch(`/api/rip?embed=${encodeURIComponent(embedUrl)}`);
+      const j = await r.json();
+      const proxied = j.proxiedUrl || (j.streamUrl ? `/api/proxy?token=${encodeURIComponent(j.streamUrl)}` : null);
+      if (!proxied) return;
+      let startTime = 0; let autoplay = false;
+      try { const u = new URL(embedUrl); startTime = Number(u.searchParams.get('progress')) || 0; autoplay = (u.searchParams.get('autoPlay') === 'true' || u.searchParams.get('autoplay') === '1'); } catch {}
+      if (window.injectCustomPlayer) window.injectCustomPlayer({ src: proxied, poster: s.poster }, { startTime, autoplay });
+    } catch (err) { console.error('embed rip failed', err); }
+  }
+
+  handleEmbedSrc(src);
 
   if (!partyState) offerResume(progress, (t) => VidoraPlayer.tvUrl(id, season, episode, t, true));
 }

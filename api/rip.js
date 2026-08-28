@@ -22,10 +22,56 @@ export default async function handler(req, res) {
     const r = await fetch(u.toString(), { redirect: 'follow' });
     const text = await r.text();
 
-    // crude regex for .m3u8 links
-    const m = text.match(/https?:\/\/[^"'<>\s]+\.m3u8[^"'<>\s]*/i);
-    if (!m) return res.status(404).json({ error: 'No m3u8 found' });
-    const streamUrl = m[0];
+    // Try multiple heuristics to find an .m3u8 URL in the embed HTML.
+    function firstMatch(regex, srcText) {
+      const mm = srcText.match(regex);
+      return mm ? mm[1] || mm[0] : null;
+    }
+
+    // 1) raw URL
+    let streamUrl = firstMatch(/(https?:\/\/[^"'<>\s]+\.m3u8[^"'<>\s]*)/i, text);
+
+    // 2) escaped JS string like "https:\/\/...\.m3u8"
+    if (!streamUrl) {
+      const esc = firstMatch(/(https?:\\\/\\\/[^"'<>\s]+\\\.m3u8[^"'<>\s]*)/i, text);
+      if (esc) streamUrl = esc.replace(/\\\//g, '/');
+    }
+
+    // 3) common JS key patterns: file: '...', source: '...'
+    if (!streamUrl) {
+      streamUrl = firstMatch(/file\s*[:=]\s*["']([^"']+\.m3u8[^"']*)["']/i, text)
+        || firstMatch(/source\s*[:=]\s*["']([^"']+\.m3u8[^"']*)["']/i, text)
+        || firstMatch(/['"](https?:\\\/\\\/[^"']+\\\.m3u8[^"']*)['"]/i, text);
+      if (streamUrl && streamUrl.includes('\\/')) streamUrl = streamUrl.replace(/\\\//g, '/');
+    }
+
+    // 4) If still not found, look for iframe src and fetch that page too (one level deep)
+    if (!streamUrl) {
+      const iframeUrl = firstMatch(/<iframe[^>]+src=["']([^"']+)["'][^>]*>/i, text);
+      if (iframeUrl) {
+        try {
+          const r2 = await fetch(iframeUrl, { redirect: 'follow' });
+          const t2 = await r2.text();
+          streamUrl = firstMatch(/(https?:\/\/[^"'<>\s]+\.m3u8[^"'<>\s]*)/i, t2) || firstMatch(/(https?:\\\/\\\/[^"'<>\s]+\\\.m3u8[^"'<>\s]*)/i, t2)?.replace(/\\\//g, '/');
+        } catch (e) {
+          // ignore iframe fetch errors
+        }
+      }
+    }
+
+    // 5) try to find large base64 blobs and decode them to search for URLs
+    if (!streamUrl) {
+      const b64 = firstMatch(/['"]([A-Za-z0-9+\/=]{64,})['"]/i, text);
+      if (b64) {
+        try {
+          const buf = Buffer.from(b64, 'base64');
+          const dec = buf.toString('utf8');
+          streamUrl = firstMatch(/(https?:\/\/[^"'<>\s]+\.m3u8[^"'<>\s]*)/i, dec) || null;
+        } catch {}
+      }
+    }
+
+    if (!streamUrl) return res.status(404).json({ error: 'No m3u8 found' });
 
     // headers likely required to fetch segments
     const headers = {

@@ -16,11 +16,14 @@ export default async function handler(req, res) {
   const embed = String(req.query?.embed || req.body?.embed || '');
   if (!embed) return res.status(400).json({ error: 'Missing embed URL' });
 
+  console.log('[rip] request for embed=', embed);
+
   try {
     const u = new URL(embed);
     // Fetch the embed page
     const r = await fetch(u.toString(), { redirect: 'follow' });
     const text = await r.text();
+    console.log(`[rip] fetched ${u.toString()} status=${r.status} contentLength=${text.length}`);
 
     // Try multiple heuristics to find an .m3u8 URL in the embed HTML.
     function firstMatch(regex, srcText) {
@@ -48,12 +51,16 @@ export default async function handler(req, res) {
     // 4) If still not found, look for iframe src and fetch that page too (one level deep)
     if (!streamUrl) {
       const iframeUrl = firstMatch(/<iframe[^>]+src=["']([^"']+)["'][^>]*>/i, text);
+      if (iframeUrl) console.log('[rip] found iframe src=', iframeUrl);
       if (iframeUrl) {
         try {
-          const r2 = await fetch(iframeUrl, { redirect: 'follow' });
+          const iframeFull = new URL(iframeUrl, u).toString();
+          const r2 = await fetch(iframeFull, { redirect: 'follow' });
           const t2 = await r2.text();
+          console.log(`[rip] fetched iframe ${iframeFull} status=${r2.status} contentLength=${t2.length}`);
           streamUrl = firstMatch(/(https?:\/\/[^"'<>\s]+\.m3u8[^"'<>\s]*)/i, t2) || firstMatch(/(https?:\\\/\\\/[^"'<>\s]+\\\.m3u8[^"'<>\s]*)/i, t2)?.replace(/\\\//g, '/');
         } catch (e) {
+          console.warn('[rip] iframe fetch failed', e && e.message);
           // ignore iframe fetch errors
         }
       }
@@ -71,7 +78,10 @@ export default async function handler(req, res) {
       }
     }
 
-    if (!streamUrl) return res.status(404).json({ error: 'No m3u8 found' });
+    if (!streamUrl) {
+      console.log('[rip] no m3u8 found in embed or iframe; returning 404');
+      return res.status(404).json({ error: 'No m3u8 found' });
+    }
 
     // headers likely required to fetch segments
     const headers = {

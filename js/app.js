@@ -924,7 +924,6 @@ async function renderWatchMovie(id, token) {
 
   VidoraPlayer.init({ id, title: m.title, mediaType: "movie", poster: m.poster }, VidoraParty.createHostSync());
 
-  // player shim that PartyUI will talk to via `.src` assignments
   const playerShim = {
     _src: null,
     set src(val) { this._src = val; handleEmbedSrc(val); },
@@ -937,25 +936,58 @@ async function renderWatchMovie(id, token) {
     buildSrc: (t, autoplay) => VidoraPlayer.movieUrl(id, t, autoplay),
   });
 
-  // initial load via rip+proxy → inject custom player
-  async function handleEmbedSrc(embedUrl) {
+  function handleEmbedSrc(embedUrl) {
     if (!embedUrl) return;
-    try {
-      const r = await fetch(`/api/rip?embed=${encodeURIComponent(embedUrl)}`);
-      const j = await r.json();
-      const proxied = j.proxiedUrl || (j.streamUrl ? `/api/proxy?token=${encodeURIComponent(j.streamUrl)}` : null);
-      if (!proxied) {
-        console.warn('No proxied URL from rip');
-        return;
+    const probeId = 'vidora-hidden-probe';
+    const existing = document.getElementById(probeId);
+    if (existing) existing.remove();
+
+    let done = false;
+    const iframe = document.createElement('iframe');
+    iframe.id = probeId;
+    iframe.setAttribute('sandbox', 'allow-scripts allow-forms');
+    iframe.setAttribute('title', 'Vidora stream probe');
+    Object.assign(iframe.style, {
+      position: 'absolute',
+      width: '1px',
+      height: '1px',
+      opacity: '0',
+      pointerEvents: 'none',
+      border: '0',
+      left: '-9999px',
+      top: '-9999px',
+      visibility: 'hidden'
+    });
+
+    const cleanup = () => {
+      if (done) return;
+      done = true;
+      window.removeEventListener('message', onMessage);
+      iframe.remove();
+    };
+
+    const onMessage = (event) => {
+      let data = event.data;
+      if (typeof data === 'string') {
+        try { data = JSON.parse(data); } catch { return; }
       }
-      // opts: try to extract progress/autoplay from embedUrl query
-      let startTime = 0; let autoplay = false;
-      try { const u = new URL(embedUrl); startTime = Number(u.searchParams.get('progress')) || 0; autoplay = (u.searchParams.get('autoPlay') === 'true' || u.searchParams.get('autoplay') === '1'); } catch {}
-      if (window.injectCustomPlayer) window.injectCustomPlayer({ src: proxied, poster: m.poster }, { startTime, autoplay });
-    } catch (err) { console.error('embed rip failed', err); }
+      if (!data || data.type !== 'RIP_DETECTED' || !data.url) return;
+      cleanup();
+      const headers = data.headers || {};
+      const streamUrl = String(data.url);
+      const startTime = Number(new URL(embedUrl).searchParams.get('progress')) || 0;
+      const autoplay = String(new URL(embedUrl).searchParams.get('autoPlay')) === 'true';
+      if (window.injectCustomPlayer) {
+        window.injectCustomPlayer({ src: streamUrl, poster: m.poster, headers }, { startTime, autoplay });
+      }
+    };
+
+    window.addEventListener('message', onMessage);
+    document.body.appendChild(iframe);
+    iframe.src = embedUrl;
+    setTimeout(cleanup, 20000);
   }
 
-  // kick off initial load
   handleEmbedSrc(src);
 
   if (!partyState) offerResume(progress, (t) => VidoraPlayer.movieUrl(id, t, true));
@@ -1011,17 +1043,56 @@ async function renderWatchSeries(id, season, episode, token) {
     buildSrc: (t, autoplay) => VidoraPlayer.tvUrl(id, season, episode, t, autoplay),
   });
 
-  async function handleEmbedSrc(embedUrl) {
+  function handleEmbedSrc(embedUrl) {
     if (!embedUrl) return;
-    try {
-      const r = await fetch(`/api/rip?embed=${encodeURIComponent(embedUrl)}`);
-      const j = await r.json();
-      const proxied = j.proxiedUrl || (j.streamUrl ? `/api/proxy?token=${encodeURIComponent(j.streamUrl)}` : null);
-      if (!proxied) return;
-      let startTime = 0; let autoplay = false;
-      try { const u = new URL(embedUrl); startTime = Number(u.searchParams.get('progress')) || 0; autoplay = (u.searchParams.get('autoPlay') === 'true' || u.searchParams.get('autoplay') === '1'); } catch {}
-      if (window.injectCustomPlayer) window.injectCustomPlayer({ src: proxied, poster: s.poster }, { startTime, autoplay });
-    } catch (err) { console.error('embed rip failed', err); }
+    const probeId = 'vidora-hidden-probe';
+    const existing = document.getElementById(probeId);
+    if (existing) existing.remove();
+
+    let done = false;
+    const iframe = document.createElement('iframe');
+    iframe.id = probeId;
+    iframe.setAttribute('sandbox', 'allow-scripts allow-forms');
+    iframe.setAttribute('title', 'Vidora stream probe');
+    Object.assign(iframe.style, {
+      position: 'absolute',
+      width: '1px',
+      height: '1px',
+      opacity: '0',
+      pointerEvents: 'none',
+      border: '0',
+      left: '-9999px',
+      top: '-9999px',
+      visibility: 'hidden'
+    });
+
+    const cleanup = () => {
+      if (done) return;
+      done = true;
+      window.removeEventListener('message', onMessage);
+      iframe.remove();
+    };
+
+    const onMessage = (event) => {
+      let data = event.data;
+      if (typeof data === 'string') {
+        try { data = JSON.parse(data); } catch { return; }
+      }
+      if (!data || data.type !== 'RIP_DETECTED' || !data.url) return;
+      cleanup();
+      const headers = data.headers || {};
+      const streamUrl = String(data.url);
+      const startTime = Number(new URL(embedUrl).searchParams.get('progress')) || 0;
+      const autoplay = String(new URL(embedUrl).searchParams.get('autoPlay')) === 'true';
+      if (window.injectCustomPlayer) {
+        window.injectCustomPlayer({ src: streamUrl, poster: s.poster, headers }, { startTime, autoplay });
+      }
+    };
+
+    window.addEventListener('message', onMessage);
+    document.body.appendChild(iframe);
+    iframe.src = embedUrl;
+    setTimeout(cleanup, 20000);
   }
 
   handleEmbedSrc(src);

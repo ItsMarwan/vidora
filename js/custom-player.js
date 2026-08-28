@@ -73,11 +73,24 @@
     video.addEventListener('timeupdate', () => { const dur = video.duration||0; const pct = dur? (video.currentTime/dur)*100:0; filled.style.width = pct+'%'; handle.style.left = pct+'%'; currentTimeEl.textContent = fmt(video.currentTime); if (video.buffered.length) { const end = video.buffered.end(video.buffered.length-1); buffered.style.width = (dur?(end/dur)*100:0)+'%'; } emitEvent('timeupdate'); });
     video.addEventListener('seeked', () => emitEvent('seeked'));
 
-    // load HLS if needed
     const src = movie.src;
+    const requestHeaders = movie.headers || {};
     if (src && src.includes('.m3u8')) {
       if (window.Hls && Hls.isSupported()) {
-        const hls = new Hls();
+        const hls = new Hls({
+          xhrSetup: (xhr, url) => {
+            Object.entries(requestHeaders).forEach(([key, value]) => {
+              if (!value || value === 'undefined') return;
+              try { xhr.setRequestHeader(key, String(value)); } catch (err) {}
+            });
+            if (requestHeaders.referer) {
+              try { xhr.setRequestHeader('Referer', String(requestHeaders.referer)); } catch (err) {}
+            }
+            if (requestHeaders.origin) {
+              try { xhr.setRequestHeader('Origin', String(requestHeaders.origin)); } catch (err) {}
+            }
+          }
+        });
         hls.loadSource(src);
         hls.attachMedia(video);
       } else {

@@ -3,14 +3,27 @@ import kv from './_lib/kv.js';
 import { assertOriginAllowed, getClientIp, rateLimit } from './_lib/security.js';
 import {
   ROOM_TTL_SECONDS,
+  getRoomKey,
+  stateKey,
+  guestsKey,
+  presenceKey,
+  hashPassword,
   cleanMeta,
+  cleanName,
   sanitizeAvatar,
   sanitizePresence,
-  getRoomKey,
-  hashPassword,
+  sanitizeState,
+  getCore,
+  saveCore,
+  touchRoom,
+  deleteRoom,
+  getGuests,
+  getPresence,
+  getState,
+  pruneGuests,
+  findGuestByToken,
+  tokensMatch,
   publicParticipants,
-  getRoom,
-  saveRoom,
 } from './_lib/party.js';
 
 /**
@@ -25,25 +38,46 @@ import {
  * ?action=... (GET) or { action } in the JSON body (POST), never in the
  * URL path, so there's no dynamic route pattern for Vercel to resolve.
  *
- * Host and guests may optionally attach a small `avatar` (a resized data
- * URL produced client-side by the local profile) alongside their name.
- * It's sanitized/size-capped before ever being written to KV — see
- * sanitizeAvatar() in _lib/party.js.
+ * Actions: create · join · leave · media · presence · state (GET = poll,
+ * POST = host pushes playback state).
+ *
+ * The player itself is irrelevant to this API: the host just reports
+ * { event, currentTime, duration, playing } and guests get it back. That
+ * is what lets the same room drive an embed iframe or a native <video>
+ * player (the Vidora media player / extension) interchangeably.
+ *
+ * Rate limits for polling/presence are keyed by the caller's secret token
+ * rather than by IP: everyone behind one home router or office NAT shares
+ * an IP, and the old per-IP budget made a second person in the same
+ * household get 429s mid-movie.
  * -----------------------------------------------------------
  */
 
 function readRoomId(req) {
   const fromQuery = req.query?.roomId;
   const fromBody = req.body?.roomId;
-  return String(fromQuery || fromBody || '').toLowerCase();
+  return String(fromQuery || fromBody || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12);
 }
 
 function readToken(req) {
-  return String(req.query?.token || req.body?.token || '');
+  return String(req.query?.token || req.body?.token || '').slice(0, 128);
 }
 
 function readAction(req) {
   return String(req.query?.action || req.body?.action || '');
+}
+
+const CODE_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789';
+function genCode(len = 6) {
+  const bytes = crypto.randomBytes(len);
+  return Array.from(bytes, (b) => CODE_CHARS[b % CODE_CHARS.length]).join('');
+}
+
+// Resolves who the caller is within a room: { role: 'host' } | { role: 'guest', guestId } | null
+function identify(core, guests, token) {
+  if (tokensMatch(token, core.hostToken)) return { role: 'host' };
+  const guestId = findGuestByToken(guests, token);
+  return guestId ? { role: 'guest', guestId } : null;
 }
 
 export default async function handler(req, res) {
@@ -59,36 +93,30 @@ export default async function handler(req, res) {
     if (!rl.allowed) return res.status(429).json({ error: 'Too many rooms created — try again later.' });
 
     const { name, password, mediaMeta, avatar } = req.body || {};
-    if (!password || String(password).length < 3) {
-      return res.status(400).json({ error: 'Choose a longer password.' });
+    if (!password || String(password).length < 3 || String(password).length > 64) {
+      return res.status(400).json({ error: 'Choose a password between 3 and 64 characters.' });
     }
-
-    const CODE_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789';
-    const genCode = (len = 6) =>
-      Array.from({ length: len }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
+    const meta = cleanMeta(mediaMeta);
+    if (!meta) return res.status(400).json({ error: 'Invalid media.' });
 
     let roomId = null;
     for (let i = 0; i < 6; i += 1) {
       const candidate = genCode();
-      const exists = await kv.get(getRoomKey(candidate));
-      if (!exists) { roomId = candidate; break; }
+      if (!(await kv.get(getRoomKey(candidate)))) { roomId = candidate; break; }
     }
     if (!roomId) return res.status(500).json({ error: 'Could not allocate a room — try again.' });
 
     const hostToken = crypto.randomBytes(24).toString('hex');
-    const room = {
+    await saveCore(roomId, {
       hostToken,
-      hostName: String(name || 'Host').slice(0, 20),
+      hostName: cleanName(name, 'Host'),
       hostAvatar: sanitizeAvatar(avatar),
       passwordHash: hashPassword(password),
-      mediaMeta: cleanMeta(mediaMeta),
-      lastState: null,
-      guests: {},
-      updatedAt: Date.now(),
-    };
-    await kv.set(getRoomKey(roomId), JSON.stringify(room), { ex: ROOM_TTL_SECONDS });
+      mediaMeta: meta,
+      createdAt: Date.now(),
+    });
 
-    return res.status(200).json({ roomId, hostToken });
+    return res.status(200).json({ roomId, hostToken, serverNow: Date.now() });
   }
 
   // ---------------- join ----------------
@@ -97,31 +125,38 @@ export default async function handler(req, res) {
     const rl = await rateLimit(`party-join:${ip}`, 20, 60 * 5);
     if (!rl.allowed) return res.status(429).json({ error: 'Too many attempts — slow down.' });
 
-    const { roomId, password, name, avatar } = req.body || {};
+    const { password, name, avatar } = req.body || {};
+    const roomId = readRoomId(req);
     if (!roomId || !password) return res.status(400).json({ error: 'Missing room code or password.' });
 
-    const room = await getRoom(roomId);
-    if (!room) return res.status(404).json({ error: 'Room not found or the party has ended.' });
-    if (hashPassword(password) !== room.passwordHash) {
+    const core = await getCore(roomId);
+    if (!core) return res.status(404).json({ error: 'Room not found or the party has ended.' });
+    if (!tokensMatch(hashPassword(password), core.passwordHash)) {
       return res.status(403).json({ error: 'Wrong password.' });
     }
 
     const guestId = crypto.randomBytes(4).toString('hex');
     const guestToken = crypto.randomBytes(24).toString('hex');
-    room.guests[guestId] = {
-      token: guestToken,
-      name: String(name || 'Guest').slice(0, 20),
-      avatar: sanitizeAvatar(avatar),
-    };
-    room.updatedAt = Date.now();
-    await saveRoom(roomId, room);
+    // A single-field hash write: two people joining at the same moment can
+    // no longer overwrite each other the way a whole-room save could.
+    await kv.hset(guestsKey(roomId), {
+      [guestId]: JSON.stringify({
+        token: guestToken,
+        name: cleanName(name, 'Guest'),
+        avatar: sanitizeAvatar(avatar),
+        joinedAt: Date.now(),
+      }),
+    });
+    await kv.expire(guestsKey(roomId), ROOM_TTL_SECONDS);
 
+    const [guests, presence, lastState] = await Promise.all([getGuests(roomId), getPresence(roomId), getState(roomId)]);
     return res.status(200).json({
       guestId,
       guestToken,
-      mediaMeta: room.mediaMeta,
-      lastState: room.lastState,
-      participants: publicParticipants(room),
+      mediaMeta: core.mediaMeta,
+      lastState,
+      participants: publicParticipants(core, guests, presence),
+      serverNow: Date.now(),
     });
   }
 
@@ -132,20 +167,19 @@ export default async function handler(req, res) {
     if (!rl.allowed) return res.status(429).json({ error: 'Too many requests' });
 
     const roomId = readRoomId(req);
-    const room = roomId ? await getRoom(roomId) : null;
-    if (!room) return res.status(200).json({ ok: true });
+    const core = roomId ? await getCore(roomId) : null;
+    if (!core) return res.status(200).json({ ok: true });
 
     const token = readToken(req);
-    if (token === room.hostToken) {
-      await kv.del(getRoomKey(roomId));
+    if (tokensMatch(token, core.hostToken)) {
+      await deleteRoom(roomId);
       return res.status(200).json({ ok: true, ended: true });
     }
 
-    const guestEntry = Object.entries(room.guests || {}).find(([, g]) => g.token === token);
-    if (guestEntry) {
-      delete room.guests[guestEntry[0]];
-      room.updatedAt = Date.now();
-      await saveRoom(roomId, room);
+    const guests = await getGuests(roomId);
+    const guestId = findGuestByToken(guests, token);
+    if (guestId) {
+      await Promise.all([kv.hdel(guestsKey(roomId), guestId), kv.hdel(presenceKey(roomId), guestId)]);
     }
     return res.status(200).json({ ok: true });
   }
@@ -153,86 +187,90 @@ export default async function handler(req, res) {
   // ---------------- media (host changes what's playing) ----------------
   if (action === 'media') {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-    const rl = await rateLimit(`party-media:${ip}`, 60, 60);
+    const token = readToken(req);
+    const rl = await rateLimit(`party-media:${token || ip}`, 60, 60);
     if (!rl.allowed) return res.status(429).json({ error: 'Too many requests' });
 
     const roomId = readRoomId(req);
-    const room = roomId ? await getRoom(roomId) : null;
-    if (!room) return res.status(404).json({ error: 'Room not found or the party has ended.' });
+    const core = roomId ? await getCore(roomId) : null;
+    if (!core) return res.status(404).json({ error: 'Room not found or the party has ended.' });
+    if (!tokensMatch(token, core.hostToken)) return res.status(403).json({ error: 'Only the host can do that.' });
 
-    const token = readToken(req);
-    if (token !== room.hostToken) return res.status(403).json({ error: 'Only the host can do that.' });
+    const meta = cleanMeta(req.body?.mediaMeta);
+    if (!meta) return res.status(400).json({ error: 'Invalid media.' });
 
-    room.mediaMeta = cleanMeta(req.body?.mediaMeta);
-    room.lastState = null;
-    room.updatedAt = Date.now();
-    await saveRoom(roomId, room);
+    core.mediaMeta = meta;
+    await saveCore(roomId, core);
+    await kv.del(stateKey(roomId)); // the previous title's position means nothing for the new one
+    await touchRoom(roomId);
     return res.status(200).json({ ok: true });
   }
 
   // ---------------- presence (anyone reports their OWN live position) ----------------
-  // Purely informational — shown next to each name in the party list so
-  // everyone can see how in sync they actually are. Never touches
-  // room.lastState, so it can never trigger a guest iframe reload by itself.
+  // Purely informational — shown next to each name in the party list, and
+  // doubles as the keep-alive that stops a guest from being pruned. Never
+  // touches the host's playback state.
   if (action === 'presence') {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-    const rl = await rateLimit(`party-presence:${ip}`, 40, 60);
+    const token = readToken(req);
+    const rl = await rateLimit(`party-presence:${token || ip}`, 60, 60);
     if (!rl.allowed) return res.status(429).json({ error: 'Too many requests' });
 
     const roomId = readRoomId(req);
-    const room = roomId ? await getRoom(roomId) : null;
-    if (!room) return res.status(404).json({ error: 'Room not found or the party has ended.' });
+    const core = roomId ? await getCore(roomId) : null;
+    if (!core) return res.status(404).json({ error: 'Room not found or the party has ended.' });
 
-    const token = readToken(req);
     const presence = sanitizePresence(req.body?.time, req.body?.playing);
     if (!presence) return res.status(400).json({ error: 'Invalid presence data.' });
 
-    if (token && token === room.hostToken) {
-      room.hostPresence = presence;
+    let who;
+    if (tokensMatch(token, core.hostToken)) {
+      who = 'host';
+      await touchRoom(roomId);
     } else {
-      const guestEntry = Object.entries(room.guests || {}).find(([, g]) => g.token === token);
-      if (!guestEntry) return res.status(403).json({ error: 'Unauthorized.' });
-      room.guests[guestEntry[0]].presence = presence;
+      const guestId = findGuestByToken(await getGuests(roomId), token);
+      if (!guestId) return res.status(403).json({ error: 'Unauthorized.' });
+      who = guestId;
     }
-    room.updatedAt = Date.now();
-    await saveRoom(roomId, room);
+    await kv.hset(presenceKey(roomId), { [who]: JSON.stringify(presence) });
     return res.status(200).json({ ok: true });
   }
 
-  // ---------------- state (guests poll via GET, host pushes via POST) ----------------
+  // ---------------- state (everyone polls via GET, host pushes via POST) ----------------
   if (action === 'state') {
-    const rl = await rateLimit(`party-state:${ip}`, 60, 60);
+    const token = readToken(req);
+    const rlIp = await rateLimit(`party-state-ip:${ip}`, 600, 60);
+    if (!rlIp.allowed) return res.status(429).json({ error: 'Too many requests' });
+    const rl = await rateLimit(`party-state:${token || ip}`, 150, 60);
     if (!rl.allowed) return res.status(429).json({ error: 'Too many requests' });
 
     const roomId = readRoomId(req);
     if (!roomId) return res.status(400).json({ error: 'Missing room id.' });
 
-    const room = await getRoom(roomId);
-    if (!room) return res.status(404).json({ error: 'Room not found or the party has ended.' });
-
-    const token = readToken(req);
-    const isHost = !!token && room.hostToken === token;
-    const isGuest = !!token && Object.values(room.guests || {}).some((g) => g.token === token);
+    const core = await getCore(roomId);
+    if (!core) return res.status(404).json({ error: 'Room not found or the party has ended.' });
 
     if (req.method === 'GET') {
-      if (!isHost && !isGuest) return res.status(403).json({ error: 'Unauthorized.' });
+      const [guestsRaw, presence, lastState] = await Promise.all([getGuests(roomId), getPresence(roomId), getState(roomId)]);
+      const me = identify(core, guestsRaw, token);
+      if (!me) return res.status(403).json({ error: 'Unauthorized.' });
+      const guests = await pruneGuests(roomId, guestsRaw, presence);
       return res.status(200).json({
-        mediaMeta: room.mediaMeta,
-        lastState: room.lastState,
-        participants: publicParticipants(room),
+        role: me.role,
+        mediaMeta: core.mediaMeta,
+        lastState,
+        participants: publicParticipants(core, guests, presence),
+        serverNow: Date.now(),
       });
     }
 
     if (req.method === 'POST') {
-      if (!isHost) return res.status(403).json({ error: 'Only the host can do that.' });
-      const state = { ...(req.body || {}) };
-      delete state.token;
-      delete state.action;
-      delete state.roomId;
-      room.lastState = state;
-      room.updatedAt = Date.now();
-      await saveRoom(roomId, room);
-      return res.status(200).json({ ok: true });
+      if (!tokensMatch(token, core.hostToken)) return res.status(403).json({ error: 'Only the host can do that.' });
+      const state = sanitizeState(req.body);
+      if (!state) return res.status(400).json({ error: 'Invalid state.' });
+      await kv.set(stateKey(roomId), JSON.stringify(state), { ex: ROOM_TTL_SECONDS });
+      await touchRoom(roomId);
+      return res.status(200).json({ ok: true, at: state.at });
     }
 
     return res.status(405).json({ error: 'Method not allowed' });

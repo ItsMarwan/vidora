@@ -48,6 +48,20 @@ export function assertOriginAllowed(req) {
   if (origin && allowed.includes(origin)) return true;
   if (!origin && referer && allowed.some((a) => referer.startsWith(a))) return true;
 
+  // Browsers omit the Origin header on same-origin GET/HEAD requests, so
+  // every plain `fetch('/api/...')` GET used to fall through to the checks
+  // below and be rejected in production unless ALLOWED_ORIGINS happened to
+  // be configured. Same-origin is the baseline that should always pass:
+  // trust the browser-set Sec-Fetch-Site header, or a Referer on our host.
+  if (!origin && req.headers['sec-fetch-site'] === 'same-origin') return true;
+  if (!origin && referer && host) {
+    try {
+      if (new URL(referer).host === host) return true;
+    } catch {
+      // ignore malformed referers
+    }
+  }
+
   if (process.env.NODE_ENV !== 'production' && host) {
     const normalizedHost = String(host).toLowerCase();
     if (normalizedHost.includes('localhost') || normalizedHost.includes('127.0.0.1') || normalizedHost.includes('0.0.0.0')) {

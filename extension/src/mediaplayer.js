@@ -1,9 +1,43 @@
+/**
+ * VIDORA NATIVE MEDIA PLAYER
+ * -----------------------------------------------------------
+ * One <video> player with Vidora's controls, used in two places from this
+ * single file:
+ *   - in the browser extension (popup -> executeScript -> this file), to
+ *     play a direct stream in place of the site's embed iframe; and
+ *   - on the site itself (index.html loads it as a plain script and exposes
+ *     window.VidoraNativePlayer), so the page can play a direct source too.
+ *
+ * WATCH PARTY SUPPORT — THE PLAYER PROTOCOL
+ * An embed iframe can only be "synced" by reloading it. A <video> we own
+ * can simply be told what to do, so this player speaks a small message
+ * protocol over window.postMessage (works between the page and an
+ * extension content script, which live in separate JS worlds but share the
+ * window's message channel):
+ *
+ *   player -> page
+ *     { type:'PLAYER_EVENT', data:{ event, currentTime, duration, paused,
+ *                                   source, playerId } }
+ *         event: play | pause | seeked | ended | timeupdate
+ *         (identical to what Vidy/URPlayer embeds emit, so the host side
+ *          of Watch Party and Continue Watching need no special casing)
+ *     { type:'VIDORA_PLAYER_READY',  playerId, source, version }
+ *     { type:'VIDORA_PLAYER_STATUS', playerId, status }
+ *         status: blocked   (browser refused autoplay; user must tap)
+ *                 unblocked (user tapped; page should re-sync)
+ *                 error     (stream failed to load)
+ *
+ *   page -> player
+ *     { type:'VIDORA_PLAYER_CMD', cmd, ... }
+ *         play | pause | seek {time} | sync {time, playing, tolerance?}
+ *         | ping | destroy
+ *
+ * There is only ever one live player: a new one announces READY, and any
+ * other player that hears a READY with a different id tears itself down.
+ * -----------------------------------------------------------
+ */
 (function () {
-  if (window.__vidoraPlayerInjected) {
-    const existing = document.getElementById('vidora-custom-player-host');
-    if (existing) existing.remove();
-  }
-  window.__vidoraPlayerInjected = true;
+  'use strict';
 
   const styleCss = `
     @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -233,6 +267,24 @@
     }
 
     .vd-player:focus-visible { box-shadow: inset 0 0 0 2px #e8b84b; }
+
+    /* Shown when the browser refuses to autoplay a party sync (needs a tap),
+       or when the video can't be played at all. */
+    .vd-overlay {
+      position: absolute; inset: 0; z-index: 6;
+      display: none; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+      background: rgba(0,0,0,0.55); text-align: center; padding: 20px;
+    }
+    .vd-player.show-overlay .vd-overlay { display: flex; }
+    .vd-overlay-btn {
+      background: #e8b84b; color: #14120d; border: none; border-radius: 999px;
+      padding: 12px 22px; font: 700 14px 'Manrope', sans-serif; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 8px;
+    }
+    .vd-overlay-btn svg { width: 18px; height: 18px; fill: #14120d; }
+    .vd-overlay-btn:focus-visible { outline: 2px solid #f2f0eb; outline-offset: 2px; }
+    .vd-overlay-msg { color: #f2f0eb; font: 500 13px 'Manrope', sans-serif; max-width: 320px; line-height: 1.5; }
+    .vd-player.overlay-error .vd-overlay-btn { display: none; }
   `;
 
   const markup = `
@@ -242,6 +294,14 @@
       <div class="vd-click-catcher" id="vdClickCatcher"></div>
 
       <div class="vd-spinner" id="vdSpinner"></div>
+
+      <div class="vd-overlay" id="vdOverlay">
+        <button class="vd-overlay-btn" id="vdOverlayBtn" type="button">
+          <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+          <span id="vdOverlayLabel">Tap to join the party</span>
+        </button>
+        <div class="vd-overlay-msg" id="vdOverlayMsg"></div>
+      </div>
 
       <div class="vd-skip-flash left" id="vdFlashLeft">
         <svg viewBox="0 0 24 24"><path d="M11 6V2L4 8l7 6v-4c3.3 0 6 2.7 6 6s-2.7 6-6 6-6-2.7-6-6H3c0 4.4 3.6 8 8 8s8-3.6 8-8-3.6-8-8-8z"/></svg>
@@ -321,16 +381,45 @@
   const ICON_FS_ENTER = '<path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>';
   const ICON_FS_EXIT = '<path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/>';
 
-  // ---- locate the iframe the site injects for playback and swap it for our player ----
+
+  // ======================================================================
+  // protocol plumbing
+  // ======================================================================
+  const PROTOCOL_VERSION = 1;
+  const IS_EXTENSION = typeof chrome !== 'undefined' && !!(chrome.runtime && chrome.runtime.onMessage);
+  const SOURCE = IS_EXTENSION ? 'ext' : 'page';
+
+  function post(msg) {
+    try { window.postMessage(msg, '*'); } catch (err) { /* nothing listening / detached */ }
+  }
+
+  function parseMessage(ev) {
+    if (ev.source !== window) return null;
+    let d = ev.data;
+    if (typeof d === 'string') {
+      try { d = JSON.parse(d); } catch { return null; }
+    }
+    return d && typeof d === 'object' ? d : null;
+  }
+
+  let active = null; // the single live controller in this JS world
+
+  function destroyActive() {
+    if (active) { try { active.destroy(); } catch (err) { /* already gone */ } }
+    active = null;
+  }
+
+  // ======================================================================
+  // locating where the player goes
+  // ======================================================================
   function findTargetIframe() {
     const candidates = [
-      'iframe[src*="vidking.net"]',
+      'iframe[src*="vidy.st"]',
       'iframe[src*="urplayer.net"]',
-      'iframe[src*="youtube.com"]',
       'iframe#playerFrame',
       'iframe.player-iframe',
       'iframe[id*="player" i]',
-      'iframe[class*="player" i]'
+      'iframe[class*="player" i]',
     ];
     for (const sel of candidates) {
       const el = document.querySelector(sel);
@@ -343,21 +432,43 @@
     return new Promise((resolve) => {
       const existing = findTargetIframe();
       if (existing) return resolve(existing);
-
       const observer = new MutationObserver(() => {
         const found = findTargetIframe();
-        if (found) {
-          observer.disconnect();
-          resolve(found);
-        }
+        if (found) { observer.disconnect(); resolve(found); }
       });
       observer.observe(document.body, { childList: true, subtree: true });
-
-      setTimeout(() => {
-        observer.disconnect();
-        resolve(findTargetIframe());
-      }, timeoutMs);
+      setTimeout(() => { observer.disconnect(); resolve(findTargetIframe()); }, timeoutMs);
     });
+  }
+
+  function removeExistingHosts(root) {
+    (root || document).querySelectorAll('#vidora-custom-player-host').forEach((el) => el.remove());
+  }
+
+  // Puts `host` where the playback surface is. On the Vidora watch page
+  // that's the #vidoraStage element (its iframe, if any, is replaced);
+  // on any other page we fall back to swapping out a player-looking iframe.
+  async function place(host, container) {
+    const stage = container || document.getElementById('vidoraStage');
+    if (stage) {
+      stage.querySelectorAll('iframe').forEach((f) => { try { f.src = 'about:blank'; } catch (err) {} f.remove(); });
+      removeExistingHosts(stage);
+      stage.appendChild(host);
+      return;
+    }
+    const iframe = await waitForIframe(5000);
+    removeExistingHosts();
+    if (iframe) {
+      if (iframe.id) host.dataset.replacedId = iframe.id;
+      if (iframe.className) host.className = iframe.className;
+      iframe.replaceWith(host);
+    } else {
+      const fallback =
+        document.getElementById('player') ||
+        document.querySelector('.player-wrapper, .player-container, main') ||
+        document.body;
+      fallback.appendChild(host);
+    }
   }
 
   function buildHost() {
@@ -375,18 +486,27 @@
     const wrap = document.createElement('div');
     wrap.innerHTML = markup;
     shadow.appendChild(wrap.firstElementChild);
-
     return { host, shadow };
   }
 
-  function wireUpPlayer(shadow, movie) {
+  // ======================================================================
+  // the player itself
+  // ======================================================================
+  function wireUpPlayer(host, shadow, opts) {
+    const movie = opts.movie || {};
+    const playerId = `${SOURCE}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const cleanups = [];
+    const listen = (target, type, fn, options) => {
+      target.addEventListener(type, fn, options);
+      cleanups.push(() => target.removeEventListener(type, fn, options));
+    };
+
     const player = shadow.getElementById('vdPlayer');
     const video = shadow.getElementById('vdVideo');
     const clickCatcher = shadow.getElementById('vdClickCatcher');
 
     const playBtn = shadow.getElementById('vdPlayBtn');
     const playIcon = shadow.getElementById('vdPlayIcon');
-    const centerBtn = shadow.getElementById('vdCenterBtn');
     const centerIcon = shadow.getElementById('vdCenterIcon');
     const backBtn = shadow.getElementById('vdBackBtn');
     const fwdBtn = shadow.getElementById('vdFwdBtn');
@@ -416,12 +536,17 @@
     const flashLeft = shadow.getElementById('vdFlashLeft');
     const flashRight = shadow.getElementById('vdFlashRight');
 
-    video.src = movie.src;
-    if (movie.poster) video.poster = movie.poster;
+    const overlayBtn = shadow.getElementById('vdOverlayBtn');
+    const overlayLabel = shadow.getElementById('vdOverlayLabel');
+    const overlayMsg = shadow.getElementById('vdOverlayMsg');
 
     let isScrubbing = false;
-    let wasPlayingBeforeScrub = false;
+    let scrubTime = 0;
     let hideTimer = null;
+    let hls = null;
+    let destroyed = false;
+    let startApplied = false;      // the start position is applied EXACTLY once (see loadedmetadata)
+    let pendingSync = null;        // a sync that arrived before metadata was ready
 
     function fmt(t) {
       if (!isFinite(t) || t < 0) t = 0;
@@ -433,6 +558,55 @@
       return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
     }
 
+    // ---------------- protocol: events out ----------------
+    function emit(name) {
+      post({
+        type: 'PLAYER_EVENT',
+        data: {
+          event: name,
+          currentTime: video.currentTime || 0,
+          duration: isFinite(video.duration) ? video.duration : 0,
+          paused: video.paused,
+          source: SOURCE,
+          playerId,
+        },
+      });
+    }
+    const status = (s) => post({ type: 'VIDORA_PLAYER_STATUS', playerId, status: s });
+
+    // ---------------- overlay (blocked autoplay / errors) ----------------
+    function showOverlay(kind, text) {
+      player.classList.add('show-overlay');
+      player.classList.toggle('overlay-error', kind === 'error');
+      overlayLabel.textContent = text || 'Tap to join the party';
+      overlayMsg.textContent = kind === 'error' ? (text || '') : '';
+      if (kind === 'join') overlayBtn.focus({ preventScroll: true });
+    }
+    function hideOverlay() { player.classList.remove('show-overlay', 'overlay-error'); }
+
+    // play() the way a party sync needs it: if the browser says no (autoplay
+    // policy — nobody has clicked in this tab yet), don't fail silently;
+    // put up a button, because a real tap is always allowed to start media.
+    function tryPlay() {
+      let p;
+      try { p = video.play(); } catch (err) { return Promise.resolve(false); }
+      if (!p || !p.then) return Promise.resolve(true);
+      return p.then(() => { hideOverlay(); return true; }).catch((err) => {
+        if (err && err.name === 'NotAllowedError') {
+          showOverlay('join', 'Tap to join the party');
+          status('blocked');
+        }
+        return false;
+      });
+    }
+
+    overlayBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideOverlay();
+      tryPlay().then((ok) => { if (ok) status('unblocked'); });
+    });
+
+    // ---------------- UI helpers ----------------
     function setPlayIcon(playing) {
       playIcon.innerHTML = playing ? ICON_PAUSE : ICON_PLAY;
       centerIcon.innerHTML = playing ? ICON_PAUSE : ICON_PLAY;
@@ -440,7 +614,7 @@
     }
 
     function togglePlay() {
-      if (video.paused || video.ended) video.play();
+      if (video.paused || video.ended) tryPlay();
       else video.pause();
     }
 
@@ -454,9 +628,7 @@
       clearTimeout(hideTimer);
       if (video.paused) return;
       hideTimer = setTimeout(() => {
-        if (!isScrubbing && !speedMenu.classList.contains('open')) {
-          player.classList.add('controls-hidden');
-        }
+        if (!isScrubbing && !speedMenu.classList.contains('open')) player.classList.add('controls-hidden');
       }, 2600);
     }
 
@@ -469,6 +641,7 @@
 
     let lastTap = 0;
     clickCatcher.addEventListener('click', (e) => {
+      player.focus({ preventScroll: true }); // so the keyboard shortcuts work after a click
       const now = Date.now();
       if (now - lastTap < 320) {
         const rect = player.getBoundingClientRect();
@@ -482,14 +655,28 @@
       wake();
     });
 
-    video.addEventListener('play', () => { setPlayIcon(true); wake(); });
-    video.addEventListener('pause', () => { setPlayIcon(false); clearTimeout(hideTimer); player.classList.remove('controls-hidden'); });
+    // ---------------- media element events ----------------
+    video.addEventListener('play', () => { setPlayIcon(true); wake(); emit('play'); });
+    video.addEventListener('pause', () => {
+      setPlayIcon(false);
+      clearTimeout(hideTimer);
+      player.classList.remove('controls-hidden');
+      if (!video.ended) emit('pause');
+    });
+    video.addEventListener('ended', () => { setPlayIcon(false); emit('ended'); });
+    video.addEventListener('seeked', () => emit('seeked'));
     video.addEventListener('waiting', () => player.classList.add('is-buffering'));
     video.addEventListener('playing', () => player.classList.remove('is-buffering'));
     video.addEventListener('canplay', () => player.classList.remove('is-buffering'));
+    video.addEventListener('error', () => {
+      player.classList.remove('is-buffering');
+      showOverlay('error', "This video couldn't be played.");
+      status('error');
+    });
 
     function skip(delta, side) {
-      video.currentTime = Math.min(Math.max(0, video.currentTime + delta), video.duration || Infinity);
+      const dur = isFinite(video.duration) ? video.duration : Infinity;
+      video.currentTime = Math.min(Math.max(0, video.currentTime + delta), dur);
       const el = side === 'left' ? flashLeft : flashRight;
       el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
       wake();
@@ -499,7 +686,7 @@
 
     function updateProgress() {
       if (isScrubbing) return;
-      const dur = video.duration || 0;
+      const dur = isFinite(video.duration) ? video.duration : 0;
       const pct = dur ? (video.currentTime / dur) * 100 : 0;
       filled.style.width = pct + '%';
       handle.style.left = pct + '%';
@@ -509,66 +696,87 @@
         buffered.style.width = (dur ? (end / dur) * 100 : 0) + '%';
       }
     }
-    video.addEventListener('timeupdate', updateProgress);
+    video.addEventListener('timeupdate', () => { updateProgress(); emit('timeupdate'); });
     video.addEventListener('progress', updateProgress);
-    video.addEventListener('loadedmetadata', () => { durationEl.textContent = fmt(video.duration); updateProgress(); });
 
+    // The start position (resume point / party join point) is applied ONCE,
+    // the first time metadata is available. `loadedmetadata` can fire again
+    // — hls.js re-attaches the media element when it recovers from a media
+    // error — and re-applying the start time every time is what made
+    // playback jump back to the saved spot mid-movie.
+    video.addEventListener('loadedmetadata', () => {
+      durationEl.textContent = fmt(video.duration);
+      if (!startApplied) {
+        startApplied = true;
+        const st = Number(opts.startTime);
+        if (pendingSync) {
+          // a party sync that arrived first is newer than any saved start time
+          applySync(pendingSync.time, pendingSync.playing, { tolerance: 0 });
+          pendingSync = null;
+        } else if (isFinite(st) && st > 0) {
+          try { video.currentTime = st; } catch (err) { /* not seekable yet */ }
+        }
+      }
+      updateProgress();
+    });
+
+    // ---------------- scrubbing ----------------
+    // Dragging the bar no longer pauses the video and resumes it afterwards:
+    // that produced a pause + play + seeked burst for every drag, which a
+    // Watch Party host would broadcast to everyone. Now there's exactly one
+    // "seeked" when the drag is released.
     function pctFromEvent(e) {
       const rect = progressWrap.getBoundingClientRect();
-      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-      return Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+      const point = e.touches && e.touches.length ? e.touches[0] : (e.changedTouches && e.changedTouches.length ? e.changedTouches[0] : e);
+      return Math.min(1, Math.max(0, (point.clientX - rect.left) / rect.width));
     }
 
     function scrubMove(e) {
       const pct = pctFromEvent(e);
       filled.style.width = (pct * 100) + '%';
       handle.style.left = (pct * 100) + '%';
-      const t = pct * (video.duration || 0);
-      scrubTooltip.textContent = fmt(t);
+      scrubTime = pct * (isFinite(video.duration) ? video.duration : 0);
+      scrubTooltip.textContent = fmt(scrubTime);
       scrubTooltip.style.left = (pct * 100) + '%';
-      currentTimeEl.textContent = fmt(t);
-      return t;
+      currentTimeEl.textContent = fmt(scrubTime);
+      return scrubTime;
+    }
+
+    function endScrub(e) {
+      if (!isScrubbing) return;
+      const t = e ? scrubMove(e) : scrubTime;
+      isScrubbing = false;
+      progressWrap.classList.remove('scrubbing');
+      video.currentTime = t;
+      wake();
     }
 
     progressWrap.addEventListener('mousedown', (e) => {
       isScrubbing = true;
-      wasPlayingBeforeScrub = !video.paused;
-      video.pause();
       progressWrap.classList.add('scrubbing');
       scrubMove(e);
       wake();
     });
-    window.addEventListener('mousemove', (e) => { if (isScrubbing) scrubMove(e); });
-    window.addEventListener('mouseup', (e) => {
-      if (!isScrubbing) return;
-      const t = scrubMove(e);
-      video.currentTime = t;
-      isScrubbing = false;
-      progressWrap.classList.remove('scrubbing');
-      if (wasPlayingBeforeScrub) video.play();
-      wake();
-    });
+    listen(window, 'mousemove', (e) => { if (isScrubbing) scrubMove(e); });
+    listen(window, 'mouseup', (e) => endScrub(e));
     progressWrap.addEventListener('mousemove', (e) => {
       if (isScrubbing) return;
       const pct = pctFromEvent(e);
-      scrubTooltip.textContent = fmt(pct * (video.duration || 0));
+      scrubTooltip.textContent = fmt(pct * (isFinite(video.duration) ? video.duration : 0));
       scrubTooltip.style.left = (pct * 100) + '%';
     });
     progressWrap.addEventListener('touchstart', (e) => {
       isScrubbing = true;
-      wasPlayingBeforeScrub = !video.paused;
-      video.pause();
       progressWrap.classList.add('scrubbing');
       scrubMove(e);
     }, { passive: true });
     progressWrap.addEventListener('touchmove', (e) => { if (isScrubbing) scrubMove(e); }, { passive: true });
-    progressWrap.addEventListener('touchend', () => {
-      if (!isScrubbing) return;
-      isScrubbing = false;
-      progressWrap.classList.remove('scrubbing');
-      if (wasPlayingBeforeScrub) video.play();
-    });
+    // touchend used to just clear the flag and resume playing — it never
+    // actually seeked, so scrubbing by touch did nothing.
+    progressWrap.addEventListener('touchend', () => endScrub(null));
+    progressWrap.addEventListener('touchcancel', () => { isScrubbing = false; progressWrap.classList.remove('scrubbing'); });
 
+    // ---------------- volume ----------------
     function updateVolumeUI() {
       const pct = video.muted ? 0 : video.volume * 100;
       volFilled.style.width = pct + '%';
@@ -580,37 +788,39 @@
     let volDragging = false;
     function setVolFromEvent(e) {
       const rect = volTrack.getBoundingClientRect();
-      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-      const pct = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+      const point = e.touches && e.touches.length ? e.touches[0] : e;
+      const pct = Math.min(1, Math.max(0, (point.clientX - rect.left) / rect.width));
       video.volume = pct;
       video.muted = pct === 0;
       updateVolumeUI();
     }
     volTrack.addEventListener('mousedown', (e) => { volDragging = true; setVolFromEvent(e); });
-    window.addEventListener('mousemove', (e) => { if (volDragging) setVolFromEvent(e); });
-    window.addEventListener('mouseup', () => { volDragging = false; });
+    listen(window, 'mousemove', (e) => { if (volDragging) setVolFromEvent(e); });
+    listen(window, 'mouseup', () => { volDragging = false; });
     volumeWrap.addEventListener('click', (e) => e.stopPropagation());
 
+    // ---------------- speed ----------------
     speedBtn.addEventListener('click', (e) => { e.stopPropagation(); speedMenu.classList.toggle('open'); });
-    speedMenu.querySelectorAll('.vd-menu-item').forEach(item => {
+    speedMenu.querySelectorAll('.vd-menu-item').forEach((item) => {
       item.addEventListener('click', (e) => {
         e.stopPropagation();
         const speed = parseFloat(item.dataset.speed);
         video.playbackRate = speed;
         speedBtn.textContent = speed + 'x';
-        speedMenu.querySelectorAll('.vd-menu-item').forEach(i => i.classList.remove('active'));
+        speedMenu.querySelectorAll('.vd-menu-item').forEach((i) => i.classList.remove('active'));
         item.classList.add('active');
         speedMenu.classList.remove('open');
       });
     });
     shadow.addEventListener('click', () => speedMenu.classList.remove('open'));
 
+    // ---------------- fullscreen ----------------
     function toggleFullscreen() {
-      if (!document.fullscreenElement) player.requestFullscreen?.();
-      else document.exitFullscreen?.();
+      if (!document.fullscreenElement) { if (player.requestFullscreen) player.requestFullscreen(); }
+      else if (document.exitFullscreen) document.exitFullscreen();
     }
     fsBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleFullscreen(); });
-    document.addEventListener('fullscreenchange', () => {
+    listen(document, 'fullscreenchange', () => {
       fsIcon.innerHTML = document.fullscreenElement ? ICON_FS_EXIT : ICON_FS_ENTER;
     });
 
@@ -638,41 +848,147 @@
       }
     });
 
+    // ---------------- protocol: commands in ----------------
+    function seekTo(t) {
+      const n = Number(t);
+      if (!isFinite(n)) return;
+      const dur = isFinite(video.duration) ? video.duration : Infinity;
+      try { video.currentTime = Math.min(Math.max(0, n), Math.max(0, dur - 0.25)); } catch (err) { /* not seekable yet */ }
+    }
+
+    // Brings this player to { time, playing }. `tolerance` is how far off
+    // (seconds) the position may be before we bother seeking — small
+    // corrections are a visible stutter, so they're only made when needed.
+    function applySync(time, playing, o) {
+      if (video.readyState < 1) {
+        // metadata not here yet: remember it, loadedmetadata applies it
+        pendingSync = { time, playing };
+        if (playing) tryPlay();
+        return;
+      }
+      const tolerance = o && typeof o.tolerance === 'number' ? o.tolerance : 1;
+      const t = Number(time);
+      if (isFinite(t)) {
+        const off = Math.abs(video.currentTime - t);
+        // when paused, land precisely so everyone looks at the same frame
+        if (off > (playing ? tolerance : Math.min(tolerance, 0.3))) seekTo(t);
+      }
+      if (playing && video.paused) tryPlay();
+      else if (!playing && !video.paused) video.pause();
+    }
+
+    function handleCommand(d) {
+      switch (d.cmd) {
+        case 'play': tryPlay(); break;
+        case 'pause': video.pause(); break;
+        case 'seek': seekTo(d.time); break;
+        case 'sync': applySync(d.time, !!d.playing, { tolerance: d.tolerance }); break;
+        case 'ping': post({ type: 'VIDORA_PLAYER_READY', playerId, source: SOURCE, version: PROTOCOL_VERSION }); emit('timeupdate'); break;
+        case 'destroy': destroy(); break;
+      }
+    }
+
+    function onMessage(ev) {
+      const d = parseMessage(ev);
+      if (!d) return;
+      if (!host.isConnected && !destroyed) { destroy(); return; } // page swapped the DOM out from under us
+      if (d.type === 'VIDORA_PLAYER_READY') {
+        // another player took over this page — step aside so only one exists
+        if (d.playerId !== playerId) destroy();
+        return;
+      }
+      if (d.type === 'VIDORA_PLAYER_CMD') handleCommand(d);
+    }
+    listen(window, 'message', onMessage);
+
+    // ---------------- source ----------------
+    function destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      clearTimeout(hideTimer);
+      cleanups.forEach((fn) => { try { fn(); } catch (err) { /* ignore */ } });
+      cleanups.length = 0;
+      if (hls) { try { hls.destroy(); } catch (err) { /* ignore */ } hls = null; }
+      try { video.pause(); video.removeAttribute('src'); video.load(); } catch (err) { /* ignore */ }
+      if (host.isConnected) host.remove();
+      if (active && active.id === playerId) active = null;
+    }
+
+    const src = movie.src || '';
+    if (movie.poster) video.poster = movie.poster;
+    if (/\.m3u8(\?|$)/i.test(src) && window.Hls && window.Hls.isSupported()) {
+      hls = new window.Hls();
+      hls.on(window.Hls.Events.ERROR, (evt, data) => {
+        if (!data || !data.fatal) return;
+        // Recover in place. Recovery keeps the current position; nothing
+        // here ever re-applies a saved start time.
+        if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
+        else if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+        else { showOverlay('error', "This video couldn't be played."); status('error'); }
+      });
+      hls.loadSource(src);
+      hls.attachMedia(video);
+    } else {
+      video.src = src;
+    }
+
     video.volume = 1;
     updateVolumeUI();
     setPlayIcon(false);
     player.classList.remove('controls-hidden');
-    video.play().catch(() => {});
+    if (opts.autoplay !== false) tryPlay();
+
+    return {
+      id: playerId,
+      video,
+      play: tryPlay,
+      pause: () => video.pause(),
+      seek: seekTo,
+      sync: applySync,
+      destroy,
+      announce: () => post({ type: 'VIDORA_PLAYER_READY', playerId, source: SOURCE, version: PROTOCOL_VERSION }),
+    };
   }
 
-  async function injectPlayer(movie) {
+  // ======================================================================
+  // public entry points
+  // ======================================================================
+
+  // create({ movie:{src,poster}, container?, startTime?, autoplay? }) -> controller
+  async function create(opts) {
+    destroyActive();
     const { host, shadow } = buildHost();
-    const iframe = await waitForIframe(5000);
-
-    if (iframe) {
-      // carry over sizing hooks so the site's surrounding layout (aspect-ratio
-      // wrappers, etc.) keeps treating this element the way it treated the iframe
-      if (iframe.id) host.dataset.replacedId = iframe.id;
-      if (iframe.className) host.className = iframe.className;
-      iframe.replaceWith(host);
-    } else {
-      // fallback: no iframe found in time, drop the player where a player
-      // container would normally live, or at the end of <main>
-      const fallbackContainer =
-        document.getElementById('player') ||
-        document.querySelector('.player-wrapper, .player-container, main') ||
-        document.body;
-      fallbackContainer.appendChild(host);
-    }
-
-    wireUpPlayer(shadow, movie);
+    await place(host, opts.container || null);
+    const ctl = wireUpPlayer(host, shadow, opts);
+    active = ctl;
+    ctl.announce(); // also tells any OTHER player on the page (e.g. the site's own copy) to step aside
+    return ctl;
   }
 
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if ((message.action === 'INJECT_VIDORA_PLAYER' || message.action === 'INJECT_STREAM') && (message.movie || message.streamUrl)) {
-      const movieData = message.movie || { src: message.streamUrl };
-      injectPlayer(movieData).then(() => sendResponse({ status: 'success' }));
-      return true; // keep the message channel open for the async response
+  // Extension entry: the popup hands us { src, title? }.
+  async function inject(movie, opts) {
+    return create({ movie, startTime: opts && opts.startTime, autoplay: true });
+  }
+
+  window.VidoraNativePlayer = { create, inject, version: PROTOCOL_VERSION };
+
+  if (IS_EXTENSION) {
+    // Re-injecting this file (every click on a quality button does) must not
+    // stack another message listener — that created a second player per
+    // injection. Keep one listener and point it at the newest code.
+    window.__vidoraNativeInject = inject;
+    if (!window.__vidoraNativeListener) {
+      window.__vidoraNativeListener = true;
+      chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if ((message.action === 'INJECT_VIDORA_PLAYER' || message.action === 'INJECT_STREAM') && (message.movie || message.streamUrl)) {
+          const movieData = message.movie || { src: message.streamUrl };
+          window.__vidoraNativeInject(movieData)
+            .then(() => sendResponse({ status: 'success' }))
+            .catch((err) => sendResponse({ status: 'error', error: String(err && err.message || err) }));
+          return true; // keep the message channel open for the async response
+        }
+        return false;
+      });
     }
-  });
+  }
 })();

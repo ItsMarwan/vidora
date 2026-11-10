@@ -1,6 +1,6 @@
 # Vidora
 
-Vidora is a polished, mobile-friendly streaming front end for browsing movies and series, watching them through the Vidking embed player, and sharing watch sessions with friends through Watch Party.
+Vidora is a polished, mobile-friendly streaming front end for browsing movies and series, watching them through the Vidy embed player, and sharing watch sessions with friends through Watch Party.
 
 It supports clean URLs, a local profile system, continue-watching progress, search, favorites, and a fully client-side router so deep links work properly.
 
@@ -55,7 +55,7 @@ If no key is configured, the app falls back to a built-in demo catalog so you ca
 
 ## Why TMDB
 
-Vidking uses TMDB IDs for playback URLs, so Vidora uses TMDB for both metadata and embed playback. That keeps browsing and player URLs aligned without extra mapping logic.
+Vidy uses TMDB IDs for playback URLs, so Vidora uses TMDB for both metadata and embed playback. That keeps browsing and player URLs aligned without extra mapping logic.
 
 ## Project structure
 
@@ -65,10 +65,12 @@ vidora/
   css/styles.css            Global styles, layout, and component styling
   js/config.js              TMDB configuration
   js/data.js                Data layer with TMDB fetches and demo fallback
-  js/player.js              Player URL generation and watch progress handling
+  js/player.js              Embed URLs, player-event stream, watch progress / Continue Watching
+  js/stage.js               The playback surface: embed iframe or native player, behind one sync() API
   js/components.js           Modal, dropdown, toast, and UI helpers
-  js/party.js               Watch Party networking logic
-  js/party-ui.js            Watch Party UI screens and join/host panels
+  js/party.js               Watch Party client: polling, host state, presence, session resume
+  js/party-ui.js            Watch Party UI + how a guest follows the host
+  extension/src/mediaplayer.js  The Vidora <video> player (extension + page), speaks the player protocol
   js/profile.js             Local profile storage and export/import helpers
   js/profile-ui.js          Profile page UI
   js/app.js                 Router, rendering, and app navigation
@@ -106,16 +108,27 @@ Watch progress is saved in local storage and surfaced in the home page as a Cont
 
 ### Watch Party
 
-Watch Party uses PeerJS over WebRTC for room-based sync.
+Watch Party is server-relayed (no WebRTC): rooms live in KV behind `/api/party`, and every participant polls it. The host's player reports `{ event, currentTime, duration, playing }`; guests receive it with a server timestamp and project the host's position forward, so joining mid-movie or a slow poll still lands on the right second.
 
 How it works:
 
-- The host opens a watch page and creates a room
-- A guest joins with the room code/password
-- The host’s playback state is mirrored to the guest as closely as possible
-- The room ends when the host closes the tab
+- The host opens a watch page and creates a room (code + password)
+- Guests join from the invite link; the host controls play, pause and seek
+- Refreshing the tab rejoins the party (the session token is kept in `sessionStorage`)
+- The room ends when the host presses **End party** (or after the 4 hour idle TTL)
 
-> Watch Party is a best-effort sync experience rather than full frame-perfect remote control, since the embed player only exposes limited playback events.
+**It works with two kinds of player**, through one small abstraction (`js/stage.js`):
+
+| Player | How a guest follows the host |
+| --- | --- |
+| Embed iframe (Vidy / URPlayer) | The iframe can't be controlled, so it is reloaded at the right position — only on host commands or large drift, never for a heartbeat. |
+| **Vidora media player** (`extension/src/mediaplayer.js`) | The player is simply *told* to seek/play/pause over `postMessage` — no reload, no re-buffering, drift corrected in place. |
+
+The media player is the same file the browser extension injects; `index.html` also loads it so the page can drive it directly (`VidoraStage.playNative()`). Both speak the protocol documented at the top of `mediaplayer.js`: `PLAYER_EVENT` out (same shape the embeds emit), `VIDORA_PLAYER_CMD` in, plus `READY`/`STATUS` announcements. When the extension replaces the iframe, the stage notices the player's `READY` message and switches the whole party over to live sync automatically. If the browser blocks an autoplay sync, the player shows a "Tap to join the party" button.
+
+### Playback progress
+
+Progress is written from one place (`js/player.js`) for the title that is actually on screen. The saved resume point is never overwritten by the first seconds of a fresh load, follows an embed's own "next episode" button, and the player isn't loaded until the "Resume where you left off?" prompt is answered.
 
 ## Deployment
 

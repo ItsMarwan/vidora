@@ -41,7 +41,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const upstream = await fetch(url.toString());
+    const upstream = await fetch(url.toString(), { signal: AbortSignal.timeout(8000) });
     const body = await upstream.text();
     res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=600');
     res.setHeader('Content-Type', 'application/json');

@@ -236,7 +236,9 @@ const VidoraData = (() => {
     const url = new URL(`${location.origin}${VIDORA_CONFIG.API_BASE}/tmdb`);
     url.searchParams.set("path", path);
     Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-    const res = await fetch(url.toString());
+    // A hung upstream used to leave every page on "Loading…" forever; time out
+    // so tmdbOrDemoFallback can take over.
+    const res = await fetch(url.toString(), { signal: AbortSignal.timeout(10000) });
     if (!res.ok) throw new Error(`Vidora API error ${res.status}`);
     return res.json();
   }

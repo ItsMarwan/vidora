@@ -2,10 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Vidora - Watch movies &amp; series</title>
     <meta name="description" content="Vidora - a clean, modern home for movies and series." />
-    <meta name="theme-color" content="#e8b84b" />
+    <meta name="theme-color" content="#0c0c0f" />
     <meta property="og:color" content="#e8b84b" />
     <meta name="robots" content="index,follow" />
     <link rel="canonical" href="https://vidora-tv.vercel.app/" />
@@ -24,9 +24,9 @@
     <meta name="twitter:description" content="Watch free movies and TV shows online in HD on Vidora. Stream the latest films, series and anime with no ads, no signup and no data collection. Enjoy 100% free streaming and Watch Party to watch together with friends." />
     <meta name="twitter:image" content="/assets/web-preview.png" />
 
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; img-src 'self' data: https:; media-src 'self' https: blob: data:; frame-src https://www.vidking.net https://urplayer.net https://www.youtube.com; form-action 'self'; object-src 'none'; base-uri 'self';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; img-src 'self' data: https:; media-src 'self' https: blob: data:; frame-src https://vidy.st https://www.vidy.st https://urplayer.net https://www.youtube.com; form-action 'self'; object-src 'none'; base-uri 'self';">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2222%22 fill=%22%230a0a0c%22/><text x=%2250%22 y=%2266%22 font-size=%2258%22 text-anchor=%22middle%22 fill=%22%23e8b84b%22 font-family=%22Georgia%22 font-style=%22italic%22>V</text></svg>">
-    <link rel="stylesheet" href="css/styles.css" />
+    <link rel="stylesheet" href="/css/styles.css" />
   </head>
   <body>
     <a href="#app" class="skip-link">Skip to content</a>
@@ -45,10 +45,11 @@
         <div class="nav-search" id="navSearch" role="search">
           <label for="searchInput" class="sr-only">Search movies &amp; series</label>
           <span class="nav-search-icon" data-icon="search" data-icon-size="16" aria-hidden="true"></span>
-          <input type="search" id="searchInput" placeholder="Search movies &amp; series…" autocomplete="off" autocapitalize="off" spellcheck="false" />
+          <input type="search" id="searchInput" placeholder="Search movies and series" autocomplete="off" autocapitalize="off" spellcheck="false" />
+          <kbd aria-hidden="true">/</kbd>
         </div>
         <!-- <div class="lang-switch" id="langSwitch" role="group" aria-label="Player language">
-          <button type="button" class="lang-switch-btn" data-lang-btn="en" aria-pressed="true" aria-label="English — Vidking player" title="English (Vidking player)">
+          <button type="button" class="lang-switch-btn" data-lang-btn="en" aria-pressed="true" aria-label="English — Vidy player" title="English (Vidy player)">
             <svg class="lang-flag" viewBox="0 0 24 16" width="20" height="14" aria-hidden="true">
               <rect width="24" height="16" fill="#b22234"/>
               <g fill="#fff">
@@ -79,14 +80,10 @@
         <button type="button" class="nav-icon-btn" id="navSurprise" title="Surprise me" aria-label="Surprise me - pick something random to watch">
           <span data-icon="dice" data-icon-size="18" aria-hidden="true"></span>
         </button>
-        <button class="nav-toggle" id="navToggle" aria-label="Open menu" aria-expanded="false" aria-controls="mobileMenu">
-          <span class="nav-toggle-bar" aria-hidden="true"></span>
-        </button>
       </div>
     </header>
 
-    <div class="mobile-menu" id="mobileMenu" role="dialog" aria-modal="true" aria-label="Menu">
-      <!-- <div class="mobile-menu-glow" aria-hidden="true"></div> hidden the glow effect for now, it was causing some issues with the menu  becoming scrollable to the left -->
+    <div class="mobile-menu" id="mobileMenu" role="dialog" aria-modal="true" aria-label="Search">
       <div class="mobile-menu-top">
         <a href="/" class="brand">Vid<span class="dot">ora</span></a>
         <button type="button" class="mobile-menu-close" id="mobileMenuClose" aria-label="Close menu">
@@ -96,8 +93,8 @@
 
       <div class="mobile-menu-search" role="search">
         <label for="mobileSearchInput" class="sr-only">Search movies &amp; series</label>
-        <!-- <span class="nav-search-icon" data-icon="search" data-icon-size="17" aria-hidden="true"></span> -->
-        <input type="search" id="mobileSearchInput" placeholder="Search movies &amp; series…" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        <span class="nav-search-icon" data-icon="search" data-icon-size="16" aria-hidden="true"></span>
+        <input type="search" id="mobileSearchInput" placeholder="Search movies and series" autocomplete="off" autocapitalize="off" spellcheck="false" />
       </div>
 
       <nav aria-label="Mobile" class="mobile-menu-links">
@@ -128,28 +125,37 @@
         </a>
       </nav>
 
-      <button type="button" class="btn btn-primary mobile-menu-surprise" id="mobileSurprise" style="--i:5">
+      <button type="button" class="btn btn-ghost mobile-menu-surprise" id="mobileSurprise" style="--i:5">
         <span data-icon="dice" data-icon-size="18" aria-hidden="true"></span> Surprise Me
       </button>
     </div>
 
     <main id="app" tabindex="-1"></main>
 
+    <nav class="tabbar" id="tabbar" aria-label="Primary">
+      <a href="/" data-route="home"><span data-icon="home" data-icon-size="22" aria-hidden="true"></span>Home</a>
+      <a href="/movies" data-route="movies"><span data-icon="film" data-icon-size="22" aria-hidden="true"></span>Movies</a>
+      <a href="/series" data-route="series"><span data-icon="tv" data-icon-size="22" aria-hidden="true"></span>Series</a>
+      <a href="/list" data-route="list"><span data-icon="heart" data-icon-size="22" aria-hidden="true"></span>My List</a>
+      <button type="button" id="tabSearch" aria-expanded="false" aria-controls="mobileMenu"><span data-icon="search" data-icon-size="22" aria-hidden="true"></span>Search</button>
+    </nav>
+
     <footer class="footer">
-      <div class="wrap footer-inner">
+      <div class="wrap">
+       <div class="footer-inner">
         <div class="footer-brand-group">
           <a href="/" class="footer-logo">Vidora</a>
           <p class="footer-copy">Discover movies and series with a clean browsing experience. Lightweight design, no signup required.</p>
         </div>
         <div class="footer-columns">
           <div class="footer-col">
-            <div class="footer-col-title">Explore</div>
+            <h3 class="footer-col-title">Explore</h3>
             <a href="/movies">Movies</a>
             <a href="/series">Series</a>
             <a href="/list">My List</a>
           </div>
           <div class="footer-col">
-            <div class="footer-col-title">Legal</div>
+            <h3 class="footer-col-title">Legal</h3>
             <a href="/legal/terms">Terms</a>
             <a href="/legal/privacy">Privacy</a>
             <a href="/legal/disclaimer">Disclaimer</a>
@@ -157,26 +163,35 @@
             <a href="/legal/hosting">Hosting</a>
           </div>
           <div class="footer-col">
-            <div class="footer-col-title">Support</div>
+            <h3 class="footer-col-title">Support</h3>
             <a href="mailto:hello@vidora.example.com">Contact</a>
-            <span class="footer-small">Playback is powered by Vidking &amp; URPlayer embeds. Ownership and availability remain with rightsholders.</span>
           </div>
+        </div>
+       </div>
+        <div class="footer-legal">
+          <p>© <span id="footerYear">2026</span> Vidora</p>
+          <p>Playback is powered by Vidy and URPlayer embeds. Ownership and availability remain with rightsholders.</p>
         </div>
       </div>
     </footer>
 
-    <script src="js/hash-redirect.js"></script>
-    <script src="js/config.js"></script>
-    <script src="js/profile.js"></script>
-    <script src="js/i18n.js"></script>
-    <script src="js/data.js"></script>
-    <script src="js/player.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.4.4/dist/hls.min.js"></script>
-    <script src="js/custom-player.js"></script>
-    <script src="js/components.js"></script>
-    <script src="js/party.js"></script>
-    <script src="js/party-ui.js"></script>
-    <script src="js/profile-ui.js"></script>
-    <script src="js/app.js"></script>
+    <script src="/js/hash-redirect.js"></script>
+    <script src="/js/config.js"></script>
+    <script src="/js/profile.js"></script>
+    <script src="/js/i18n.js"></script>
+    <script src="/js/data.js"></script>
+    <script src="/js/player.js"></script>
+    <!-- The Vidora media player: the same file the browser extension injects.
+         Loaded here so the page can also drive a native <video> player
+         (VidoraNativePlayer) - see js/stage.js. All asset paths are root-absolute:
+         relative ones resolved under the route on deep links (/watch/movie/1,
+         /party/abc123) and the server answered with index.html for them. -->
+    <script src="/extension/src/mediaplayer.js"></script>
+    <script src="/js/stage.js"></script>
+    <script src="/js/components.js"></script>
+    <script src="/js/party.js"></script>
+    <script src="/js/party-ui.js"></script>
+    <script src="/js/profile-ui.js"></script>
+    <script src="/js/app.js"></script>
   </body>
 </html>

@@ -254,13 +254,15 @@ async function loadSavedMovies() {
   savedMovies.forEach((item, index) => {
     const div = document.createElement('div');
     div.className = 'saved-item';
-    div.innerHTML = `
-      <span><strong>${item.title}</strong></span>
-      <div class="saved-actions">
-        <button class="btn-play-saved">Select</button>
-        <button class="btn-del-saved">✕</button>
-      </div>
-    `;
+    // Titles come from scraped pages — build with textContent, never innerHTML.
+    const label = document.createElement('span');
+    const strong = document.createElement('strong');
+    strong.textContent = item.title;
+    label.appendChild(strong);
+    const actions = document.createElement('div');
+    actions.className = 'saved-actions';
+    actions.innerHTML = '<button class="btn-play-saved">Select</button><button class="btn-del-saved">✕</button>';
+    div.append(label, actions);
 
     div.querySelector('.btn-play-saved').onclick = () => {
       currentMediaItem = { title: item.title, url: item.url, year: item.year };

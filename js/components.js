@@ -143,7 +143,10 @@ const VD = (() => {
   }
 
   // ---------------- Modal ----------------
-  function modal({ title, sub, bodyHTML, actions = [], wide = false }) {
+  // `onDismiss` runs when the dialog is closed WITHOUT choosing one of its
+  // actions (✕ button, Escape, clicking the backdrop). Closing via an
+  // action's own close() does not call it.
+  function modal({ title, sub, bodyHTML, actions = [], wide = false, onDismiss }) {
     const titleId = `vd-modal-title-${seq++}`;
     const triggerEl = document.activeElement;
     const backdrop = document.createElement("div");
@@ -167,13 +170,21 @@ const VD = (() => {
     const firstField = dialog.querySelector('input:not([type="hidden"]):not([hidden]), select, textarea');
     (firstField || dialog.querySelector(".vd-modal-close")).focus();
 
+    let closed = false;
     function close() {
+      if (closed) return;
+      closed = true;
       backdrop.remove();
       document.removeEventListener("keydown", onKeydown);
       if (triggerEl && triggerEl.focus) triggerEl.focus();
     }
+    function dismiss() {
+      if (closed) return;
+      close();
+      if (onDismiss) onDismiss();
+    }
     function onKeydown(e) {
-      if (e.key === "Escape") { close(); return; }
+      if (e.key === "Escape") { dismiss(); return; }
       if (e.key === "Tab") {
         const items = focusable();
         if (!items.length) return;
@@ -183,8 +194,8 @@ const VD = (() => {
       }
     }
     document.addEventListener("keydown", onKeydown);
-    backdrop.querySelector(".vd-modal-close").addEventListener("click", close);
-    backdrop.addEventListener("click", (e) => { if (e.target === backdrop) close(); });
+    backdrop.querySelector(".vd-modal-close").addEventListener("click", dismiss);
+    backdrop.addEventListener("click", (e) => { if (e.target === backdrop) dismiss(); });
     actions.forEach((a) => {
       const btn = backdrop.querySelector(`[data-action="${a.id}"]`);
       if (btn) btn.addEventListener("click", () => a.onClick(close, backdrop));

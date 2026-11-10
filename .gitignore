@@ -3,3 +3,4 @@
 .env.local
 dev-server.js
 /refrence
+.agents

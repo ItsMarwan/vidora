@@ -1,6 +1,8 @@
 ﻿import { assertOriginAllowed, getClientIp, rateLimit } from './_lib/security.js';
 import kv from './_lib/kv.js';
 
+const ALLOWED_EMBED_HOSTS = new Set(['vidy.st', 'www.vidy.st', 'urplayer.net', 'www.urplayer.net']);
+
 function normalizeUrl(value) {
   return String(value || '').replace(/\\\//g, '/').replace(/\\u003a/gi, ':');
 }
@@ -40,6 +42,13 @@ export default async function handler(req, res) {
 
   try {
     const u = new URL(embed);
+    // This route fetches whatever URL it's handed from OUR server, so
+    // without a host allowlist it was an open server-side request forgery
+    // hole (e.g. ?embed=http://169.254.169.254/... or an internal service).
+    // Only the two embed providers Vidora actually plays from are allowed.
+    if (u.protocol !== 'https:' || !ALLOWED_EMBED_HOSTS.has(u.hostname.toLowerCase())) {
+      return res.status(400).json({ error: 'Unsupported embed host' });
+    }
     const headers = {
       referer: u.toString(),
       origin: u.origin,

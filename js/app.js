@@ -59,6 +59,10 @@ if (redirectedPath) {
     let u;
     try { u = new URL(a.href, location.href); } catch { return; }
     if (u.origin !== location.origin) return;
+    // A same-page #fragment link (the "Skip to content" link) is just an
+    // in-page jump. It used to be routed like a navigation, which re-rendered
+    // the page — on a watch page that restarted the player.
+    if (u.hash && u.pathname === location.pathname && u.search === location.search) return;
     e.preventDefault();
     navigate(u.pathname + u.search);
   }, true);
@@ -141,8 +145,13 @@ window.addEventListener("popstate", () => route());
 
 // ---------------- shared bits ----------------
 
+// Escapes text for BOTH attribute values and element content. It used to
+// escape only & and ", so a title like "Foo <3" (or anything reflected from
+// the URL / a party host) could break out of its markup.
 function escAttr(str) {
-  return String(str ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  return String(str ?? "")
+    .replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;")
+    .replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 // ---------------- My List (favorites) ----------------
@@ -268,7 +277,7 @@ function wireDetailActions(container, item, trailerKeyPromise, token) {
     trailerBtn.hidden = false;
     trailerBtn.addEventListener("click", () => {
       VD.modal({
-        title: `${item.title} — Trailer`,
+        title: `${escAttr(item.title)} — Trailer`,
         wide: true,
         bodyHTML: `<div class="trailer-frame-wrap"><iframe src="https://www.youtube.com/embed/${key}?autoplay=1" title="${escAttr(item.title)} trailer" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe></div>`,
         actions: [{ id: "close", label: "Close", variant: "btn-ghost", onClick: (close) => close() }],
@@ -280,7 +289,7 @@ function wireDetailActions(container, item, trailerKeyPromise, token) {
 async function paintRelatedRow(container, item, token) {
   const related = await VidoraData.relatedTitles(item);
   if (token !== routeToken || !related.length) return;
-  container.innerHTML = rowSection("More Like This", "similar picks", related);
+  container.innerHTML = rowSection("More like this", "", related);
   wireRowScrollers(container);
 }
 
@@ -317,7 +326,7 @@ function rowSection(title, sub, items) {
       <div class="wrap">
         <div class="section-head">
           <h2 class="section-title">${title}</h2>
-          <span class="section-sub">${sub}</span>
+          ${sub ? `<span class="section-sub">${escAttr(sub)}</span>` : ""}
         </div>
       </div>
       <div class="row-scroll-wrap">
@@ -328,80 +337,41 @@ function rowSection(title, sub, items) {
     </section>`;
 }
 
-function heroSlideMarkup(item, index, isActive) {
-  const href = item.mediaType === "tv" ? `/series/${item.id}` : `/movie/${item.id}`;
-  const playHref = item.mediaType === "tv" ? href : `/watch/movie/${item.id}`;
+// ---------------- hero: one featured title ----------------
+// A hero that rotates by itself moves the thing you were about to click, so
+// this one never advances on its own: one title, picked per day, with its
+// words on the ground and its artwork in a frame (nothing sits on a photo).
+function heroBlock(item, { enter = false } = {}) {
+  if (!item) return "";
+  const isTv = item.mediaType === "tv";
+  const href = isTv ? `/series/${item.id}` : `/movie/${item.id}`;
+  const playHref = isTv ? href : `/watch/movie/${item.id}`;
+  const seasons = isTv && item.seasons ? item.seasons.length : 0;
   return `
-    <div class="hero-slide${isActive ? " active" : ""}" data-index="${index}">
-      <div class="hero-slide-bg" style="${item.backdrop ? `background-image:url('${item.backdrop}')` : ""}"></div>
-      <div class="hero-slide-scrim"></div>
-      <div class="hero-content">
-        <div class="hero-eyebrow">Featured ${item.mediaType === "tv" ? "series" : "film"}</div>
-        <h1 class="hero-title">${item.title}</h1>
-        <div class="hero-meta">
-          ${starRow(item.rating)}
-          <span>${item.year || ""}</span>
-          ${item.runtime ? `<span>${item.runtime} min</span>` : ""}
+    <section class="hero${enter ? " is-entering" : ""}" id="heroSection" aria-labelledby="heroTitle">
+      <div class="wrap hero-grid">
+        <div class="hero-copy">
+          <span class="pill">Featured ${isTv ? "series" : "film"}</span>
+          <h1 class="hero-title" id="heroTitle">${escAttr(item.title)}</h1>
+          <div class="hero-meta">
+            ${starRow(item.rating)}
+            ${item.year ? `<span>${escAttr(item.year)}</span>` : ""}
+            ${item.runtime ? `<span>${item.runtime} min</span>` : ""}
+            ${seasons ? `<span>${seasons} season${seasons > 1 ? "s" : ""}</span>` : ""}
+          </div>
+          <p class="hero-overview">${escAttr(item.overview || "")}</p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="${playHref}">${VD.icon("playFilled", { size: 16 })} ${isTv ? "View episodes" : "Play movie"}</a>
+            <a class="btn btn-ghost" href="${href}">More info</a>
+          </div>
         </div>
-        <p class="hero-overview">${(item.overview || "").slice(0, 220)}${(item.overview || "").length > 220 ? "…" : ""}</p>
-        <div class="hero-actions">
-          <a class="btn btn-ticket" href="${playHref}">${VD.icon("playFilled", { size: 15 })} ${item.mediaType === "tv" ? "View episodes" : "Play now"}</a>
-          <a class="btn btn-ghost" href="${href}">More info</a>
-        </div>
+        <a class="hero-media" href="${href}" tabindex="-1" aria-hidden="true">${thumbImg(item.backdrop, item.title, { w: 1280, h: 720, loading: "eager" })}</a>
       </div>
-    </div>`;
+    </section>`;
 }
 
-function heroBlock(items) {
-  if (!items || !items.length) return "";
-  const slides = items.map((item, i) => heroSlideMarkup(item, i, i === 0)).join("");
-  const dots = items.length > 1
-    ? `<div class="hero-dots" role="tablist" aria-label="Featured titles">
-        ${items.map((item, i) => `<button type="button" class="hero-dot${i === 0 ? " active" : ""}" data-index="${i}" role="tab" aria-selected="${i === 0}" aria-label="Show ${item.title}"></button>`).join("")}
-      </div>`
-    : "";
-  return `
-    <section class="hero" id="heroSection">${slides}${dots}</section>
-    <div class="perf perf-top"></div>`;
-}
-
-let heroInterval = null;
-function stopHeroRotation() {
-  if (heroInterval) { clearInterval(heroInterval); heroInterval = null; }
-}
 function prefersReducedMotion() {
   return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
-
-function wireHeroRotation(items) {
-  stopHeroRotation();
-  const hero = document.getElementById("heroSection");
-  if (!hero || !items || items.length < 2) return;
-
-  const slides = [...hero.querySelectorAll(".hero-slide")];
-  const dots = [...hero.querySelectorAll(".hero-dot")];
-  let index = 0;
-
-  function show(i) {
-    index = (i + items.length) % items.length;
-    slides.forEach((s, si) => s.classList.toggle("active", si === index));
-    dots.forEach((d, di) => {
-      d.classList.toggle("active", di === index);
-      d.setAttribute("aria-selected", String(di === index));
-    });
-  }
-
-  function restart() {
-    stopHeroRotation();
-    if (prefersReducedMotion()) return;
-    heroInterval = setInterval(() => show(index + 1), 7000);
-  }
-
-  dots.forEach((d) => d.addEventListener("click", () => { show(Number(d.dataset.index)); restart(); }));
-  hero.addEventListener("mouseenter", stopHeroRotation);
-  hero.addEventListener("mouseleave", restart);
-
-  restart();
 }
 
 // Bumped on every route() call so slow/late responses from a page the
@@ -411,10 +381,6 @@ let routeToken = 0;
 
 function backBar(label, fallbackPath) {
   return `<div class="page-back-row"><button type="button" class="back-btn" data-fallback="${fallbackPath}">${VD.icon("arrowLeft", { size: 15 })} ${label}</button></div>`;
-}
-
-function heroBackButton(fallbackPath) {
-  return `<button type="button" class="hero-back-btn" data-fallback="${fallbackPath}" aria-label="Go back">${VD.icon("arrowLeft", { size: 19 })}</button>`;
 }
 
 function wireBackButtons(container) {
@@ -443,7 +409,10 @@ window.addEventListener("mouseup", () => {
 
 // Listen for movie pick events dispatched from the browser extension
 window.addEventListener("message", async (event) => {
-  // Validate action payload from extension
+  // Only the page itself (or the extension acting as it) may steer the
+  // router. Embed iframes post messages to this window too - they must not
+  // be able to navigate the app.
+  if (event.source !== window) return;
   if (!event.data || event.data.type !== "VIDORA_SELECT_MOVIE") return;
 
   const { tmdbId, watch = false } = event.data;
@@ -516,8 +485,25 @@ function wireRowScrollers(container) {
   });
 }
 
-function loadingState() {
-  return `<div class="empty-state"><div class="vd-spinner" aria-hidden="true">${VD.icon("sparkle", { size: 30 })}</div><h3>Loading…</h3></div>`;
+// Static placeholders in the shape of what's coming: calm, nothing sweeps or
+// blinks, and the page doesn't jump when the real content lands.
+function loadingState(kind = "rows") {
+  const cards = Array.from({ length: 10 }, () => `<div class="sk sk-card"></div>`).join("");
+  const hero = kind === "home"
+    ? `<div class="sk-hero">
+         <div class="sk-lines">
+           <div class="sk sk-line" style="width:120px"></div>
+           <div class="sk sk-line" style="height:64px;width:92%"></div>
+           <div class="sk sk-line" style="width:56%"></div>
+           <div class="sk sk-line" style="height:96px"></div>
+         </div>
+         <div class="sk sk-media"></div>
+       </div>`
+    : "";
+  const inner = `<span class="sr-only">Loading…</span>${hero}<div class="sk sk-title"></div><div class="sk-row">${cards}</div>`;
+  return kind === "inline"
+    ? `<div role="status" aria-live="polite">${inner}</div>`
+    : `<div class="wrap sk-page" role="status" aria-live="polite">${inner}</div>`;
 }
 
 function emptyState(title, sub, buttonLabel) {
@@ -527,14 +513,25 @@ function emptyState(title, sub, buttonLabel) {
 // ---------------- pages ----------------
 
 async function renderHome(token) {
-  app.innerHTML = loadingState();
+  app.innerHTML = loadingState("home");
   const [trendingMovies, popularMovies, trendingShows, topRated] = await Promise.all([
     VidoraData.trendingMovies(), VidoraData.popularMovies(),
     VidoraData.trendingShows(), VidoraData.topRatedMovies(),
   ]);
   if (token !== routeToken) return;
-  const featured = [...trendingMovies.slice(0, 3), ...trendingShows.slice(0, 2)];
-  if (!featured.length) featured.push(...popularMovies.slice(0, 3));
+
+  // One featured title, changing daily rather than on a timer.
+  const pool = [...trendingMovies.slice(0, 3), ...trendingShows.slice(0, 2)];
+  if (!pool.length) pool.push(...popularMovies.slice(0, 3));
+  const featured = pool.length ? pool[Math.floor(Date.now() / 86400000) % pool.length] : null;
+
+  // The hero's entrance plays once per visit, not on every return to Home.
+  let enter = false;
+  try {
+    enter = !sessionStorage.getItem("vidora_hero_entered");
+    sessionStorage.setItem("vidora_hero_entered", "1");
+  } catch { /* storage unavailable: just skip the entrance */ }
+
   const cw = VidoraPlayer.getContinueWatching();
   const cwItems = cw.map((c) => ({
     id: c.id, title: c.title, mediaType: c.mediaType, poster: c.poster,
@@ -545,28 +542,33 @@ async function renderHome(token) {
   }));
 
   app.innerHTML = `
-    ${heroBlock(featured)}
-    ${rowSection("Continue Watching", "pick up where you left off", cwItems)}
-    ${rowSection("My List", "saved for later", getMyList())}
-    ${rowSection("Trending Now", "movies", trendingMovies)}
-    ${rowSection("Trending Series", "shows", trendingShows)}
-    ${rowSection("Popular Movies", "on Vidora", popularMovies)}
-    ${rowSection("Top Rated", "critics' picks", topRated)}
+    ${heroBlock(featured, { enter })}
+    ${rowSection("Continue watching", "Pick up where you left off", cwItems)}
+    ${rowSection("My List", "Saved for later", getMyList())}
+    ${rowSection("Trending movies", "", trendingMovies)}
+    ${rowSection("Trending series", "", trendingShows)}
+    ${rowSection("Popular movies", "", popularMovies)}
+    ${rowSection("Top rated", "", topRated)}
   `;
-  wireHeroRotation(featured);
   wireRowScrollers(app);
 }
 
+function gridSkeleton() {
+  return Array.from({ length: 12 }, () => `<div class="sk sk-card" style="flex:none;width:auto"></div>`).join("");
+}
+
 async function renderGrid(kind, token) {
+  const noun = kind === "movies" ? "movie" : "series";
   app.innerHTML = `
     <div class="wrap">
       <div class="grid-page-head">
         ${backBar("Back", "/")}
         <h1 class="grid-page-title">${kind === "movies" ? "Movies" : "Series"}</h1>
         <p class="grid-page-desc">${kind === "movies" ? "Everything from new releases to all-time favorites." : "Full seasons, ready whenever you are."}</p>
-        <div class="chip-row" id="genreChips"></div>
+        <div class="chip-row" id="genreChips" role="group" aria-label="Filter by genre"></div>
+        <p class="result-count" id="gridCount" aria-live="polite"></p>
       </div>
-      <div class="poster-grid" id="gridItems">${loadingState()}</div>
+      <div class="poster-grid" id="gridItems"><span class="sr-only" role="status">Loading…</span>${gridSkeleton()}</div>
     </div>`;
   wireBackButtons(app);
 
@@ -582,20 +584,23 @@ async function renderGrid(kind, token) {
 
   const chips = document.getElementById("genreChips");
   chips.innerHTML = ["All", ...genres].map((g, i) =>
-    `<button class="chip ${i === 0 ? "active" : ""}" data-genre="${g}">${g}</button>`).join("");
+    `<button class="chip${i === 0 ? " active" : ""}" type="button" data-genre="${escAttr(g)}" aria-pressed="${i === 0}">${escAttr(g)}</button>`).join("");
 
   function paint(genre) {
     const filtered = genre === "All" ? items : items.filter((i) => (i.genres || []).includes(genre));
     document.getElementById("gridItems").innerHTML = filtered.length
       ? filtered.map(card).join("")
       : emptyState("Nothing here yet", "Try a different genre.");
+    document.getElementById("gridCount").textContent =
+      `${filtered.length} ${noun === "movie" ? "movie" : "series"}${filtered.length === 1 ? "" : noun === "movie" ? "s" : ""}${genre === "All" ? "" : ` in ${genre}`}`;
   }
   paint("All");
   chips.addEventListener("click", (e) => {
     const btn = e.target.closest(".chip");
     if (!btn) return;
-    chips.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
+    chips.querySelectorAll(".chip").forEach((c2) => { c2.classList.remove("active"); c2.setAttribute("aria-pressed", "false"); });
     btn.classList.add("active");
+    btn.setAttribute("aria-pressed", "true");
     paint(btn.dataset.genre);
   });
 }
@@ -607,11 +612,12 @@ function renderMyList() {
       <div class="grid-page-head">
         ${backBar("Back", "/")}
         <h1 class="grid-page-title">My List</h1>
-        <p class="grid-page-desc">Titles you've saved to watch later — tap the heart on any poster to add or remove one.</p>
+        <p class="grid-page-desc">Titles you've saved to watch later. Tap the heart on any poster to add or remove one.</p>
+        ${items.length ? `<p class="result-count">${items.length} saved</p>` : ""}
       </div>
       ${items.length
         ? `<div class="poster-grid">${items.map(card).join("")}</div>`
-        : emptyState("Your list is empty", "Tap the heart on any movie or series to save it here.")}
+        : emptyState("Your list is empty", "Tap the heart on any movie or series to save it here.", "Browse titles")}
     </div>`;
   wireBackButtons(app);
 }
@@ -628,7 +634,7 @@ const legalPages = {
     sections: [
       {
         heading: 'Service overview',
-        body: 'Vidora provides a lightweight front-end for discovering movies and series. The site does not host or distribute media. Playback is provided by external embed providers such as Vidking and URPlayer.',
+        body: 'Vidora provides a lightweight front-end for discovering movies and series. The site does not host or distribute media. Playback is provided by external embed providers such as Vidy and URPlayer.',
       },
       {
         heading: 'User obligations',
@@ -742,34 +748,36 @@ async function renderMovieDetail(id, token) {
   app.innerHTML = loadingState();
   const m = await VidoraData.movieDetails(id);
   if (token !== routeToken) return;
-  if (!m) { 
-    app.innerHTML = emptyState("Not found", "That title isn't available."); 
-    return; 
+  if (!m) {
+    app.innerHTML = emptyState("Not found", "That title isn't available.", "Go home");
+    return;
   }
 
   // Set the browser tab title dynamically from TMDB data
-  document.title = `${m.title} (${m.year || ""}) - Vidora`;
+  document.title = `${m.title}${m.year ? ` (${m.year})` : ""} - Vidora`;
+
+  // The main action says where you'll land: a saved spot turns "Play" into "Resume".
+  const at = resumePoint(VidoraPlayer.getProgress(id, "movie"));
+  const playLabel = at !== null ? `Resume at ${clockLabel(at)}` : "Play movie";
 
   app.innerHTML = `
-    <section class="detail-hero" style="background-image:url('${m.backdrop}')">
-      ${heroBackButton("/movies")}
-    </section>
+    <div class="wrap detail-top">${backBar("Back", "/movies")}</div>
     <div class="wrap detail-body">
-      <div class="detail-poster">${thumbImg(m.poster, m.title, { w: 500, h: 750 })}</div>
+      <div class="detail-poster">${thumbImg(m.poster, m.title, { w: 500, h: 750, loading: "eager" })}</div>
       <div class="detail-main">
-        <h1 class="detail-title">${m.title}</h1>
+        <h1 class="detail-title">${escAttr(m.title)}</h1>
         <div class="detail-meta">
           ${starRow(m.rating)}
-          <span>${m.year || ""}</span>
+          ${m.year ? `<span>${escAttr(m.year)}</span>` : ""}
           ${m.runtime ? `<span>${m.runtime} min</span>` : ""}
           ${m.certification ? `<span class="cert-badge">${escAttr(m.certification)}</span>` : ""}
         </div>
-        <div class="genre-tags">${(m.genres || []).map((g) => `<span class="genre-tag">${g}</span>`).join("")}</div>
-        ${m.certificationDescription ? `<div class="detail-rating-desc">${escAttr(m.certificationDescription)}</div>` : ""}
+        ${(m.genres || []).length ? `<div class="genre-tags">${m.genres.map((g) => `<span class="genre-tag">${escAttr(g)}</span>`).join("")}</div>` : ""}
+        <p class="detail-overview">${escAttr(m.overview || "")}</p>
+        ${m.certificationDescription ? `<p class="detail-rating-desc">${escAttr(m.certificationDescription)}</p>` : ""}
         ${m.guideUrl ? `<a class="detail-guide-link" href="${escAttr(m.guideUrl)}" target="_blank" rel="noopener">IMDb parental guide</a>` : ""}
-        <p class="detail-overview">${m.overview || ""}</p>
         <div class="detail-actions">
-          <a class="btn btn-ticket" href="/watch/movie/${m.id}">${VD.icon("playFilled", { size: 15 })} Play movie</a>
+          <a class="btn btn-primary" href="/watch/movie/${m.id}">${VD.icon("playFilled", { size: 16 })} ${playLabel}</a>
           ${trailerButtonHTML()}
           ${favButtonHTML(m)}
           ${shareButtonHTML()}
@@ -787,27 +795,37 @@ async function renderSeriesDetail(id, seasonParam, token) {
   app.innerHTML = loadingState();
   const s = await VidoraData.showDetails(id);
   if (token !== routeToken) return;
-  if (!s) { app.innerHTML = emptyState("Not found", "That title isn't available."); return; }
+  if (!s) { app.innerHTML = emptyState("Not found", "That title isn't available.", "Go home"); return; }
   const seasonNum = Number(seasonParam) || s.seasons[0]?.season_number || 1;
   const season = await VidoraData.seasonDetails(id, seasonNum);
   if (token !== routeToken) return;
-  if (!season) { app.innerHTML = emptyState("Not found", "That season isn't available."); return; }
+  if (!season) { app.innerHTML = emptyState("Not found", "That season isn't available.", "Go home"); return; }
+  document.title = `${s.title} - Vidora`;
+
+  // Continue where you left off in this show, else start the season.
+  const last = VidoraPlayer.getContinueWatching().find((c) => c.mediaType === "tv" && String(c.id) === String(id));
+  const firstEp = season.episodes[0]?.episode_number || 1;
+  const playHref = last ? `/watch/series/${id}/${last.season}/${last.episode}` : `/watch/series/${id}/${seasonNum}/${firstEp}`;
+  const playLabel = last ? `Continue S${last.season} E${last.episode}` : `Play season ${seasonNum}`;
 
   app.innerHTML = `
-    <section class="detail-hero" style="background-image:url('${s.backdrop}')">
-      ${heroBackButton("/series")}
-    </section>
+    <div class="wrap detail-top">${backBar("Back", "/series")}</div>
     <div class="wrap detail-body">
-      <div class="detail-poster">${thumbImg(s.poster, s.title, { w: 500, h: 750 })}</div>
+      <div class="detail-poster">${thumbImg(s.poster, s.title, { w: 500, h: 750, loading: "eager" })}</div>
       <div class="detail-main">
-        <h1 class="detail-title">${s.title}</h1>
-        <div class="detail-meta">${starRow(s.rating)}<span>${s.year || ""}</span><span>${s.seasons.length} season${s.seasons.length > 1 ? "s" : ""}</span>${s.certification ? `<span class="cert-badge">${escAttr(s.certification)}</span>` : ""}</div>
-        <div class="genre-tags">${(s.genres || []).map((g) => `<span class="genre-tag">${g}</span>`).join("")}</div>
-        ${s.certificationDescription ? `<div class="detail-rating-desc">${escAttr(s.certificationDescription)}</div>` : ""}
+        <h1 class="detail-title">${escAttr(s.title)}</h1>
+        <div class="detail-meta">
+          ${starRow(s.rating)}
+          ${s.year ? `<span>${escAttr(s.year)}</span>` : ""}
+          <span>${s.seasons.length} season${s.seasons.length > 1 ? "s" : ""}</span>
+          ${s.certification ? `<span class="cert-badge">${escAttr(s.certification)}</span>` : ""}
+        </div>
+        ${(s.genres || []).length ? `<div class="genre-tags">${s.genres.map((g) => `<span class="genre-tag">${escAttr(g)}</span>`).join("")}</div>` : ""}
+        <p class="detail-overview">${escAttr(s.overview || "")}</p>
+        ${s.certificationDescription ? `<p class="detail-rating-desc">${escAttr(s.certificationDescription)}</p>` : ""}
         ${s.guideUrl ? `<a class="detail-guide-link" href="${escAttr(s.guideUrl)}" target="_blank" rel="noopener">IMDb parental guide</a>` : ""}
-        <p class="detail-overview">${s.overview || ""}</p>
         <div class="detail-actions">
-          <a class="btn btn-ticket" href="/watch/series/${id}/${seasonNum}/${season.episodes[0]?.episode_number || 1}">${VD.icon("playFilled", { size: 15 })} Play Season ${seasonNum}</a>
+          <a class="btn btn-primary" href="${playHref}">${VD.icon("playFilled", { size: 16 })} ${playLabel}</a>
           ${trailerButtonHTML()}
           ${favButtonHTML(s)}
           ${shareButtonHTML()}
@@ -820,18 +838,16 @@ async function renderSeriesDetail(id, seasonParam, token) {
 
         <div class="episode-list" id="episodeList">
           ${season.episodes.map((e) => `
-            <div class="episode-row">
-              <div class="episode-num">${String(e.episode_number).padStart(2, "0")}</div>
+            <a class="episode-row" href="/watch/series/${id}/${seasonNum}/${e.episode_number}" aria-label="Play episode ${e.episode_number}: ${escAttr(e.name)}">
+              <div class="episode-num">${e.episode_number}</div>
               <div class="episode-thumb">${thumbImg(e.still, `${s.title} — ${e.name}`, { w: 300, h: 169 })}</div>
               <div>
-                <div class="episode-name">${e.name}</div>
-                <div class="episode-overview">${e.overview || ""}</div>
+                <div class="episode-name">${escAttr(e.name)}</div>
+                <div class="episode-overview">${escAttr(e.overview || "")}</div>
               </div>
-              <div style="display:flex;align-items:center;gap:14px;">
-                <span class="episode-runtime">${e.runtime ? e.runtime + " min" : ""}</span>
-                <a class="episode-play" href="/watch/series/${id}/${seasonNum}/${e.episode_number}" title="Play episode ${e.episode_number}">${VD.icon("playFilled", { size: 14 })}</a>
-              </div>
-            </div>`).join("")}
+              <span class="episode-runtime">${e.runtime ? e.runtime + " min" : ""}</span>
+              <span class="episode-play" aria-hidden="true">${VD.icon("playFilled", { size: 14 })}</span>
+            </a>`).join("")}
         </div>
       </div>
     </div>
@@ -849,220 +865,295 @@ async function renderSeriesDetail(id, seasonParam, token) {
   paintRelatedRow(document.getElementById("relatedRow"), s, token);
 }
 
-const RESUME_MIN_SECONDS = 15;
-function offerResume(progress, buildResumedSrc) {
-  if (!progress || !progress.currentTime || progress.currentTime < RESUME_MIN_SECONDS) return;
-  if (progress.duration && progress.progress >= 0.95) return;
-
-  const mins = Math.floor(progress.currentTime / 60);
-  const secs = Math.floor(progress.currentTime % 60).toString().padStart(2, "0");
-  const timeLabel = `${mins}:${secs}`;
-
-  VD.modal({
-    title: "Resume where you left off?",
-    sub: `You were at ${timeLabel}.`,
-    actions: [
-      { id: "restart", label: "Start over", variant: "btn-ghost", onClick: (close) => close() },
-      { id: "resume", label: `Resume at ${timeLabel}`, variant: "btn-primary", onClick: (close) => {
-          const iframe = document.querySelector(".player-frame-wrap iframe");
-          if (iframe) iframe.src = buildResumedSrc(progress.currentTime);
-          close();
-        } },
-    ],
-  });
-}
-
-function playerDetailsBlock(item, features) {
+// Overview block under the player.
+function playerDetailsBlock(item) {
+  const meta = [
+    item.rating != null ? starRow(item.rating) : "",
+    item.year ? `<span>${escAttr(item.year)}</span>` : "",
+    item.certification ? `<span class="cert-badge">${escAttr(item.certification)}</span>` : "",
+    item.runtime ? `<span>${item.runtime} min</span>` : "",
+  ].filter(Boolean).join("");
+  if (!meta && !(item.genres || []).length && !item.overview) return "";
   return `
     <div class="player-details">
       <div class="player-details-main">
-        <div class="detail-meta">
-          ${starRow(item.rating)}
-          ${item.year ? `<span>${item.year}</span>` : ""}
-          ${item.certification ? `<span class="cert-badge">${escAttr(item.certification)}</span>` : ""}
-          ${item.runtime ? `<span>${item.runtime} min</span>` : ""}
-        </div>
-        ${(item.genres || []).length ? `<div class="genre-tags">${item.genres.map((g) => `<span class="genre-tag">${g}</span>`).join("")}</div>` : ""}
-        ${item.overview ? `<p class="player-overview">${item.overview}</p>` : ""}
+        ${meta ? `<div class="detail-meta" style="margin-top:0">${meta}</div>` : ""}
+        ${(item.genres || []).length ? `<div class="genre-tags">${item.genres.map((g) => `<span class="genre-tag">${escAttr(g)}</span>`).join("")}</div>` : ""}
+        ${item.overview ? `<p class="player-overview">${escAttr(item.overview)}</p>` : ""}
       </div>
-      <ul class="player-features">
-        ${features.map((f) => `<li><span class="pf-icon" aria-hidden="true">${f.icon}</span>${f.label}</li>`).join("")}
-      </ul>
     </div>`;
+}
+
+// ---------------- watch pages ----------------
+// Everything a watch page sets up that must be undone when the person
+// leaves it: the playback stage (and any native player in it), the party
+// panel, progress tracking, and a still-open resume prompt. route() calls
+// this before every navigation. Previously nothing was torn down, so the
+// previous page's listeners, player and tracked title lived on.
+let watchCleanup = null;
+function teardownWatch() {
+  if (!watchCleanup) return;
+  const fn = watchCleanup;
+  watchCleanup = null;
+  try { fn(); } catch (err) { console.error(err); }
+}
+
+const RESUME_MIN_SECONDS = 15;
+
+function resumePoint(progress) {
+  if (!progress || !progress.currentTime || progress.currentTime < RESUME_MIN_SECONDS) return null;
+  if (progress.duration && progress.progress >= 0.95) return null;
+  return progress.currentTime;
+}
+
+function clockLabel(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60).toString().padStart(2, "0");
+  return `${mins}:${secs}`;
+}
+
+// Same identity rule PartyUI uses to decide whether the party is on this page.
+function sameWatchMedia(meta, w) {
+  if (!meta || meta.mediaType !== w.mediaType || String(meta.id) !== String(w.id)) return false;
+  if (w.mediaType === "tv") return String(meta.season) === String(w.season) && String(meta.episode) === String(w.episode);
+  return true;
+}
+
+// Decides where playback STARTS and then starts it.
+//
+// The player is not loaded until the question is answered. It used to load
+// from 0:00 (and autoplay) behind the "Resume where you left off?" prompt
+// and only jump when the person clicked — so playback visibly snapped back
+// to the saved spot partway through whatever they'd already started
+// watching, and the Resume button silently did nothing at all once the
+// iframe was swapped out for the player shim.
+//
+// Returns a function that closes a still-open prompt (for teardown).
+function startPlayback(stage, { party, progress }) {
+  // Watching along with a party: start where the host IS (projected to
+  // now), never at a saved spot of our own. With no host state yet, wait
+  // paused rather than playing ahead of the host.
+  if (party) {
+    const pos = VidoraParty.getHostPosition();
+    if (pos && !pos.ended) stage.loadIframe(pos.time, pos.playing);
+    else stage.loadIframe(0, false);
+    return () => {};
+  }
+
+  const at = resumePoint(progress);
+  if (at === null) { stage.loadIframe(0, true); return () => {}; }
+
+  let answered = false;
+  const choose = (time) => { if (answered) return; answered = true; stage.loadIframe(time, true); };
+  const label = clockLabel(at);
+  const m = VD.modal({
+    title: "Resume where you left off?",
+    sub: `You were at ${label}.`,
+    // ✕ / Esc / clicking outside = "no preference" = start from the top
+    onDismiss: () => choose(0),
+    actions: [
+      { id: "restart", label: "Start over", variant: "btn-ghost", onClick: (close) => { close(); choose(0); } },
+      { id: "resume", label: `Resume at ${label}`, variant: "btn-primary", onClick: (close) => { close(); choose(at); } },
+    ],
+  });
+  return () => { answered = true; m.close(); };
+}
+
+// Shared by the movie and episode watch pages.
+//   watch: { mediaType, id, season?, episode?, title, poster }
+//   buildUrl(w, time, autoplay): the embed URL for the current w
+function mountWatchPlayer(watch, buildUrl, hooks = {}) {
+  const w = { ...watch }; // mutable: an embed's own "next episode" button changes season/episode
+  const party = VidoraParty.isGuest() && sameWatchMedia(VidoraParty.getMediaMeta(), w);
+  const progress = VidoraPlayer.getProgress(w.id, w.mediaType, w.season, w.episode);
+
+  const stage = VidoraStage.create({
+    container: document.getElementById("vidoraStage"),
+    buildIframeUrl: (t, autoplay) => buildUrl(w, t, autoplay),
+    title: w.title,
+  });
+
+  VidoraPlayer.init(
+    { id: w.id, title: w.title, mediaType: w.mediaType, poster: w.poster, season: w.season, episode: w.episode },
+    {
+      onMetaChange: (m) => {
+        w.season = m.season; w.episode = m.episode;
+        history.replaceState({}, "", `/watch/series/${w.id}/${w.season}/${w.episode}`);
+        document.title = `S${w.season}E${w.episode} - ${w.title} - Vidora`;
+        PartyUI.updateContext({ season: w.season, episode: w.episode });
+        if (hooks.onMetaChange) hooks.onMetaChange(w);
+      },
+    },
+  );
+
+  PartyUI.mount(document.getElementById("partyContainer"), { ...w, stage });
+  const closePrompt = startPlayback(stage, { party, progress });
+
+  watchCleanup = () => {
+    closePrompt();
+    PartyUI.unmount();
+    VidoraPlayer.stop();
+    VidoraStage.teardown();
+  };
 }
 
 async function renderWatchMovie(id, token) {
   app.innerHTML = loadingState();
   const m = await VidoraData.movieDetails(id);
   if (token !== routeToken) return;
-  if (!m) { app.innerHTML = emptyState("Not found", "That title isn't available."); return; }
+  if (!m) { app.innerHTML = emptyState("Not found", "That title isn't available.", "Go home"); return; }
   document.title = `${m.title} - Vidora`;
-  const partyState = VidoraParty.isGuest() && VidoraParty.getMediaMeta() &&
-    String(VidoraParty.getMediaMeta().id) === String(id) && VidoraParty.getMediaMeta().mediaType === "movie"
-    ? VidoraParty.getLastState() : null;
-  const progress = VidoraPlayer.getProgress(id, "movie");
-  const src = partyState
-    ? VidoraPlayer.movieUrl(id, partyState.currentTime || 0, partyState.event !== "pause")
-    : VidoraPlayer.movieUrl(id, 0);
 
   app.innerHTML = `
     <div class="wrap player-page">
       <div class="player-topbar">
-        <a class="player-back" href="/movie/${id}">${VD.icon("arrowLeft", { size: 15 })} Back</a>
-        <span class="player-title">${m.title}</span>
+        <a class="player-back" href="/movie/${id}">${VD.icon("arrowLeft", { size: 16 })} Back</a>
+        <div class="player-heading">
+          <h1 class="player-title">${escAttr(m.title)}</h1>
+        </div>
       </div>
-      <div class="player-frame-wrap">
-        <div id="player-host-placeholder"></div>
+      <div class="watch-grid">
+        <div class="watch-main"><div class="player-frame-wrap" id="vidoraStage"></div></div>
       </div>
-      ${playerDetailsBlock(m, [
-        { icon: VD.icon("save", { size: 15 }), label: "Progress is saved automatically as you watch" },
-        { icon: VD.icon("users", { size: 15 }), label: "Start a Watch Party to watch in sync with friends" },
-        { icon: VD.icon("maximize", { size: 15 }), label: "Full screen playback on any device" },
-      ])}
       <div id="partyContainer"></div>
+      ${playerDetailsBlock(m)}
     </div>`;
 
-  VidoraPlayer.init({ id, title: m.title, mediaType: "movie", poster: m.poster }, VidoraParty.createHostSync());
-
-  const playerShim = {
-    _src: null,
-    set src(val) {
-      if (this._src === val) return;
-      this._src = val;
-      handleEmbedSrc(val);
-    },
-    get src() { return this._src; }
-  };
-
-  PartyUI.mount(document.getElementById("partyContainer"), {
-    mediaType: "movie", id, title: m.title, poster: m.poster,
-    getIframe: () => playerShim,
-    buildSrc: (t, autoplay) => VidoraPlayer.movieUrl(id, t, autoplay),
-  });
-
-  async function handleEmbedSrc(embedUrl) {
-    if (!embedUrl) return;
-    try {
-      const r = await fetch(`/api/rip?embed=${encodeURIComponent(embedUrl)}`);
-      const j = await r.json();
-      const streamUrl = j.proxiedUrl || j.streamUrl;
-      if (!streamUrl) {
-        console.warn('No stream URL resolved for embed', embedUrl, j);
-        return;
-      }
-      const startTime = Number(new URL(embedUrl).searchParams.get('progress')) || 0;
-      const autoplay = String(new URL(embedUrl).searchParams.get('autoPlay')) === 'true';
-      if (window.injectCustomPlayer) {
-        window.injectCustomPlayer({ src: streamUrl, poster: m.poster, headers: j.headers || {} }, { startTime, autoplay });
-      }
-    } catch (err) {
-      console.error('embed rip failed', err);
-    }
-  }
-
-  handleEmbedSrc(src);
-
-  if (!partyState) offerResume(progress, (t) => VidoraPlayer.movieUrl(id, t, true));
+  mountWatchPlayer(
+    { mediaType: "movie", id, title: m.title, poster: m.poster },
+    (w, t, autoplay) => VidoraPlayer.movieUrl(w.id, t, autoplay),
+  );
 }
 
 async function renderWatchSeries(id, season, episode, token) {
   app.innerHTML = loadingState();
   const [s, se] = await Promise.all([VidoraData.showDetails(id), VidoraData.seasonDetails(id, season)]);
   if (token !== routeToken) return;
-  if (!s) { app.innerHTML = emptyState("Not found", "That title isn't available."); return; }
+  if (!s) { app.innerHTML = emptyState("Not found", "That title isn't available.", "Go home"); return; }
   document.title = `S${season}E${episode} - ${s.title} - Vidora`;
-  const ep = se.episodes.find((e) => e.episode_number === Number(episode));
-  const partyState = VidoraParty.isGuest() && VidoraParty.getMediaMeta() &&
-    String(VidoraParty.getMediaMeta().id) === String(id) && VidoraParty.getMediaMeta().mediaType === "tv" &&
-    String(VidoraParty.getMediaMeta().season) === String(season) && String(VidoraParty.getMediaMeta().episode) === String(episode)
-    ? VidoraParty.getLastState() : null;
-  const progress = VidoraPlayer.getProgress(id, "tv", season, episode);
-  const src = partyState
-    ? VidoraPlayer.tvUrl(id, season, episode, partyState.currentTime || 0, partyState.event !== "pause")
-    : VidoraPlayer.tvUrl(id, season, episode, 0);
+
+  // `se` is undefined when the season can't be loaded (offline, or an id
+  // that isn't in the demo catalog).
+  const episodes = se && se.episodes ? se.episodes : [];
+  const epHref = (n) => `/watch/series/${id}/${season}/${n}`;
+  const byNumber = (n) => episodes.find((e) => e.episode_number === Number(n));
+  const cur = byNumber(episode);
+  const subText = (n) => `Season ${season} · Episode ${n}${byNumber(n) ? ` — ${byNumber(n).name}` : ""}`;
+
+  const sideRows = episodes.map((e) => {
+    const pr = VidoraPlayer.getProgress(id, "tv", season, e.episode_number);
+    const pct = pr && pr.progress > 0.02 && pr.progress < 0.95 ? Math.round(pr.progress * 100) : 0;
+    return `
+      <a class="side-ep" href="${epHref(e.episode_number)}"${e.episode_number === Number(episode) ? ' aria-current="true"' : ""}>
+        <span class="side-ep-num">${e.episode_number}</span>
+        <span class="side-ep-name">${escAttr(e.name)}</span>
+        <span class="side-ep-time">${e.runtime ? `${e.runtime} min` : ""}</span>
+        ${pct ? `<span class="side-ep-bar" aria-hidden="true"><span style="width:${pct}%"></span></span>` : ""}
+      </a>`;
+  }).join("");
+
+  const side = episodes.length ? `
+    <aside class="watch-side" aria-label="Episodes">
+      <div class="watch-side-inner">
+        <div class="watch-side-head">
+          <h2>Season ${escAttr(season)}</h2>
+          <p>${episodes.length} episode${episodes.length === 1 ? "" : "s"}</p>
+        </div>
+        <nav class="side-list" id="sideList" aria-label="Episodes in season ${escAttr(season)}">${sideRows}</nav>
+      </div>
+    </aside>` : "";
 
   app.innerHTML = `
     <div class="wrap player-page">
       <div class="player-topbar">
-        <a class="player-back" href="/series/${id}/${season}">${VD.icon("arrowLeft", { size: 15 })} Back to episodes</a>
-        <span class="player-title">${s.title} · S${season}E${episode}${ep ? " — " + ep.name : ""}</span>
+        <a class="player-back" href="/series/${id}/${season}">${VD.icon("arrowLeft", { size: 16 })} Episodes</a>
+        <div class="player-heading">
+          <h1 class="player-title">${escAttr(s.title)}</h1>
+          <p class="player-sub" id="playerSub">${escAttr(subText(episode))}</p>
+        </div>
+        <div class="player-nav">
+          <a class="btn btn-ghost btn-sm" id="epPrev" href="#" hidden>${VD.icon("chevronLeft", { size: 14 })} Previous</a>
+          <a class="btn btn-ghost btn-sm" id="epNext" href="#" hidden>Next ${VD.icon("chevronRight", { size: 14 })}</a>
+        </div>
       </div>
-      <div class="player-frame-wrap">
-        <div id="player-host-placeholder"></div>
+      <div class="watch-grid${side ? " has-side" : ""}">
+        <div class="watch-main"><div class="player-frame-wrap" id="vidoraStage"></div></div>
+        ${side}
       </div>
-      ${playerDetailsBlock(
-        { rating: s.rating, year: s.year, genres: s.genres, runtime: ep && ep.runtime, overview: (ep && ep.overview) || s.overview },
-        [
-          { icon: VD.icon("save", { size: 15 }), label: "Progress is saved automatically per episode" },
-          { icon: VD.icon("skipForward", { size: 15 }), label: "Auto-plays the next episode when this one ends" },
-          { icon: VD.icon("users", { size: 15 }), label: "Start a Watch Party to watch in sync with friends" },
-        ],
-      )}
       <div id="partyContainer"></div>
+      ${playerDetailsBlock({ rating: s.rating, year: s.year, genres: s.genres, runtime: cur && cur.runtime, overview: (cur && cur.overview) || s.overview })}
     </div>`;
 
-  VidoraPlayer.init({ id, title: s.title, mediaType: "tv", poster: s.poster, season, episode }, VidoraParty.createHostSync());
-
-  const playerShim = {
-    _src: null,
-    set src(val) {
-      if (this._src === val) return;
-      this._src = val;
-      handleEmbedSrc(val);
-    },
-    get src() { return this._src; }
-  };
-
-  PartyUI.mount(document.getElementById("partyContainer"), {
-    mediaType: "tv", id, season, episode, title: s.title, poster: s.poster,
-    getIframe: () => playerShim,
-    buildSrc: (t, autoplay) => VidoraPlayer.tvUrl(id, season, episode, t, autoplay),
-  });
-
-  async function handleEmbedSrc(embedUrl) {
-    if (!embedUrl) return;
-    try {
-      const r = await fetch(`/api/rip?embed=${encodeURIComponent(embedUrl)}`);
-      const j = await r.json();
-      const streamUrl = j.proxiedUrl || j.streamUrl;
-      if (!streamUrl) {
-        console.warn('No stream URL resolved for embed', embedUrl, j);
-        return;
-      }
-      const startTime = Number(new URL(embedUrl).searchParams.get('progress')) || 0;
-      const autoplay = String(new URL(embedUrl).searchParams.get('autoPlay')) === 'true';
-      if (window.injectCustomPlayer) {
-        window.injectCustomPlayer({ src: streamUrl, poster: s.poster, headers: j.headers || {} }, { startTime, autoplay });
-      }
-    } catch (err) {
-      console.error('embed rip failed', err);
-    }
+  // Previous / next episode, and the "now playing" marker in the list. Also
+  // re-run when an embed's own next-episode button moves to another episode.
+  function paintEpisodeChrome(n) {
+    n = Number(n);
+    const prev = byNumber(n - 1), next = byNumber(n + 1);
+    const prevEl = document.getElementById("epPrev"), nextEl = document.getElementById("epNext");
+    if (prevEl) { prevEl.hidden = !prev; if (prev) prevEl.href = epHref(prev.episode_number); }
+    if (nextEl) { nextEl.hidden = !next; if (next) nextEl.href = epHref(next.episode_number); }
+    const sub = document.getElementById("playerSub");
+    if (sub) sub.textContent = subText(n);
+    const list = document.getElementById("sideList");
+    if (!list) return;
+    list.querySelectorAll(".side-ep").forEach((a) => {
+      const here = a.getAttribute("href") === epHref(n);
+      if (here) a.setAttribute("aria-current", "true"); else a.removeAttribute("aria-current");
+    });
+    // keep the current episode in view inside the list WITHOUT scrolling the page
+    const active = list.querySelector('[aria-current="true"]');
+    if (active) list.scrollTop = Math.max(0, active.offsetTop - list.clientHeight / 2 + active.clientHeight / 2);
   }
+  paintEpisodeChrome(episode);
 
-  handleEmbedSrc(src);
-
-  if (!partyState) offerResume(progress, (t) => VidoraPlayer.tvUrl(id, season, episode, t, true));
+  mountWatchPlayer(
+    { mediaType: "tv", id, season: String(season), episode: String(episode), title: s.title, poster: s.poster },
+    (w, t, autoplay) => VidoraPlayer.tvUrl(w.id, w.season, w.episode, t, autoplay),
+    { onMetaChange: (w) => paintEpisodeChrome(w.episode) },
+  );
 }
 
 async function renderSearch(query, token) {
+  saveRecentSearch(query);
   app.innerHTML = `
-    <div class="wrap">
+    <div class="wrap search-page">
       <div class="grid-page-head">
-        <h1 class="grid-page-title">Results for “${query}”</h1>
+        <h1 class="grid-page-title">Results for “${escAttr(query)}”</h1>
+        <div class="chip-row" id="searchChips" role="group" aria-label="Filter results" hidden></div>
       </div>
-      <div id="searchResults">${loadingState()}</div>
+      <div id="searchResults">${loadingState("inline")}</div>
     </div>`;
   const { movies, shows } = await VidoraData.search(query);
   if (token !== routeToken) return;
   const el = document.getElementById("searchResults");
   if (!movies.length && !shows.length) {
-    el.innerHTML = emptyState("No matches", "Try a different title or keyword.");
+    el.innerHTML = emptyState("No matches", "Check the spelling, or try a shorter title or a different keyword.");
     return;
   }
-  el.innerHTML = `
-    ${movies.length ? `<h2 class="section-title" style="margin:20px 0 14px;">Movies</h2><div class="poster-grid">${movies.map(card).join("")}</div>` : ""}
-    ${shows.length ? `<h2 class="section-title" style="margin:20px 0 14px;">Series</h2><div class="poster-grid">${shows.map(card).join("")}</div>` : ""}
-  `;
+
+  const chips = document.getElementById("searchChips");
+  function paint(which) {
+    const showMovies = movies.length && which !== "series";
+    const showShows = shows.length && which !== "movies";
+    el.innerHTML = `
+      ${showMovies ? `<section class="search-group"><h2>Movies <span class="muted">${movies.length}</span></h2><div class="poster-grid">${movies.map(card).join("")}</div></section>` : ""}
+      ${showShows ? `<section class="search-group"><h2>Series <span class="muted">${shows.length}</span></h2><div class="poster-grid">${shows.map(card).join("")}</div></section>` : ""}`;
+  }
+  // The filter only earns its place when there is something to filter.
+  if (movies.length && shows.length) {
+    chips.hidden = false;
+    chips.innerHTML = [["all", `All ${movies.length + shows.length}`], ["movies", `Movies ${movies.length}`], ["series", `Series ${shows.length}`]]
+      .map(([v, label], i) => `<button type="button" class="chip${i === 0 ? " active" : ""}" data-which="${v}" aria-pressed="${i === 0}">${label}</button>`).join("");
+    chips.addEventListener("click", (e) => {
+      const btn = e.target.closest(".chip");
+      if (!btn) return;
+      chips.querySelectorAll(".chip").forEach((c) => { c.classList.remove("active"); c.setAttribute("aria-pressed", "false"); });
+      btn.classList.add("active");
+      btn.setAttribute("aria-pressed", "true");
+      paint(btn.dataset.which);
+    });
+  }
+  paint("all");
 }
 
 // ---------------- router ----------------
@@ -1120,7 +1211,7 @@ function matchRoute(pathname) {
 }
 
 function setActiveNav(routeName) {
-  document.querySelectorAll(".nav-links a, .mobile-menu-links a").forEach((a) => {
+  document.querySelectorAll(".nav-links a, .mobile-menu-links a, .tabbar a").forEach((a) => {
     const isActive = a.dataset.route === routeName;
     a.classList.toggle("active", isActive);
     if (isActive) a.setAttribute("aria-current", "page");
@@ -1135,11 +1226,11 @@ function playPageTransition() {
 }
 
 async function route() {
+  teardownWatch(); // stop the previous watch page's player/party/tracking before anything else
   const myToken = ++routeToken;
   const matched = matchRoute(location.pathname);
   if (!matched || !matched.route.modal) window.scrollTo(0, 0);
   closeMobileMenu();
-  stopHeroRotation();
   playPageTransition();
 
   setActiveNav(matched ? matched.route.nav : "");
@@ -1175,55 +1266,97 @@ async function goSurpriseMe() {
   }
 }
 
+// Recent searches: shown when the empty search box is focused, so getting
+// back to something you looked for is one tap instead of retyping it.
+const RECENT_KEY = "vidora_recent_searches";
+function getRecentSearches() {
+  try {
+    const v = JSON.parse(localStorage.getItem(RECENT_KEY));
+    return Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.trim()).slice(0, 6) : [];
+  } catch { return []; }
+}
+function saveRecentSearch(q) {
+  const term = String(q || "").trim();
+  if (!term) return;
+  try {
+    const list = [term, ...getRecentSearches().filter((x) => x.toLowerCase() !== term.toLowerCase())].slice(0, 6);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+  } catch { /* storage unavailable */ }
+}
+function clearRecentSearches() {
+  try { localStorage.removeItem(RECENT_KEY); } catch { /* ignore */ }
+}
+
 function wireSearchInput(input) {
   if (!input) return;
 
-  // Create suggestions container
   const wrap = input.parentElement;
-  let sugEl = wrap.querySelector('.search-suggestions');
+  let sugEl = wrap.querySelector(".search-suggestions");
   if (!sugEl) {
-    sugEl = document.createElement('div');
-    sugEl.className = 'search-suggestions';
-    sugEl.style.display = 'none';
+    sugEl = document.createElement("div");
+    sugEl.className = "search-suggestions";
+    sugEl.style.display = "none";
     wrap.appendChild(sugEl);
   }
+  sugEl.id = `${input.id}Listbox`;
+  sugEl.setAttribute("role", "listbox");
+  input.setAttribute("role", "combobox");
+  input.setAttribute("aria-autocomplete", "list");
+  input.setAttribute("aria-controls", sugEl.id);
+  input.setAttribute("aria-expanded", "false");
 
   let suggestions = [];
   let activeIndex = -1;
-  let lastQuery = '';
+  let lastQuery = "";
 
-  function renderSuggestions(list) {
-    suggestions = list || [];
+  function hide() {
+    suggestions = [];
     activeIndex = -1;
-    if (!suggestions.length) {
-      sugEl.style.display = 'none';
-      sugEl.innerHTML = '';
-      return;
-    }
-    sugEl.innerHTML = suggestions.map((s, i) =>
-      `<div class="suggestion-item" role="option" data-index="${i}" data-href="${escAttr(s.href)}">
-         <img class="suggestion-thumb" src="${escAttr(s.image)}" alt="${escAttr(s.title)} poster" />
-         <div class="suggestion-copy">
-           <span class="suggestion-title">${escAttr(s.title)}</span>
-           <span class="suggestion-meta">${escAttr(s.year || '')} · ${escAttr(s.type)}</span>
-         </div>
-       </div>`).join('');
-    sugEl.style.display = '';
+    sugEl.style.display = "none";
+    sugEl.innerHTML = "";
+    input.setAttribute("aria-expanded", "false");
+  }
+
+  function show(items, headHTML = "") {
+    suggestions = items;
+    activeIndex = -1;
+    if (!items.length && !headHTML) { hide(); return; }
+    sugEl.innerHTML = headHTML + items.map((s, i) => s.recent
+      ? `<div class="suggestion-item" role="option" data-index="${i}" data-href="${escAttr(s.href)}">
+           <span class="suggestion-glyph" aria-hidden="true">${VD.icon("clock", { size: 18 })}</span>
+           <div class="suggestion-copy"><span class="suggestion-title">${escAttr(s.title)}</span></div>
+         </div>`
+      : `<div class="suggestion-item" role="option" data-index="${i}" data-href="${escAttr(s.href)}">
+           <img class="suggestion-thumb" src="${escAttr(s.image)}" alt="" loading="lazy" />
+           <div class="suggestion-copy">
+             <span class="suggestion-title">${escAttr(s.title)}</span>
+             <span class="suggestion-meta">${escAttr(s.type)}${s.year ? ` · ${escAttr(s.year)}` : ""}</span>
+           </div>
+         </div>`).join("");
+    sugEl.style.display = "";
+    input.setAttribute("aria-expanded", "true");
+  }
+
+  function showRecent() {
+    const recent = getRecentSearches();
+    if (!recent.length) { hide(); return; }
+    show(
+      recent.map((q) => ({ recent: true, title: q, href: `/search/${encodeURIComponent(q)}` })),
+      `<div class="suggestion-head"><span>Recent searches</span><button type="button" data-clear>Clear</button></div>`,
+    );
   }
 
   function setActive(i) {
-    const items = sugEl.querySelectorAll('.suggestion-item');
-    items.forEach((it) => it.classList.remove('active'));
+    const items = sugEl.querySelectorAll(".suggestion-item");
+    items.forEach((it) => it.classList.remove("active"));
     if (i >= 0 && items[i]) {
-      items[i].classList.add('active');
-      items[i].scrollIntoView({ block: 'nearest' });
+      items[i].classList.add("active");
+      items[i].scrollIntoView({ block: "nearest" });
       activeIndex = i;
     } else {
       activeIndex = -1;
     }
   }
-
-  function clearSuggestions() { renderSuggestions([]); }
 
   // Debounced search
   let debounceTimer = null;
@@ -1231,86 +1364,90 @@ function wireSearchInput(input) {
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(async () => {
       debounceTimer = null;
-      const val = (q || '').trim();
-      if (!val) { clearSuggestions(); return; }
+      const val = (q || "").trim();
+      if (!val) { showRecent(); return; }
       lastQuery = val;
       try {
         const res = await VidoraData.search(val);
         // Merge movies and shows, prioritise movies then shows, limit 8
-        const items = [ ...(res.movies || []), ...(res.shows || []) ].slice(0, 8).map((it) => ({
-          title: it.title || it.name || '',
-          year: it.year || it.first_air_date || it.year || '',
-          href: it.mediaType === 'tv' ? `/series/${it.id}` : `/movie/${it.id}`,
-          type: it.mediaType === 'tv' ? 'Series' : 'Movie',
-          image: it.poster || it.backdrop || VidoraData.placeholder(it.title || it.name || 'Title', 80, 120),
+        const items = [...(res.movies || []), ...(res.shows || [])].slice(0, 8).map((it) => ({
+          title: it.title || it.name || "",
+          year: it.year || "",
+          href: it.mediaType === "tv" ? `/series/${it.id}` : `/movie/${it.id}`,
+          type: it.mediaType === "tv" ? "Series" : "Movie",
+          image: it.poster || it.backdrop || VidoraData.placeholder(it.title || it.name || "Title", 80, 120),
         }));
-        // Only render if query hasn't changed
-        if (lastQuery === val) renderSuggestions(items);
+        // Only render if the query hasn't changed meanwhile
+        if (lastQuery !== val) return;
+        if (items.length) show(items);
+        else show([], `<div class="suggestion-head"><span>No matches for “${escAttr(val)}”</span></div>`);
       } catch (err) {
-        console.error('Search suggestions failed', err);
-        clearSuggestions();
+        console.error("Search suggestions failed", err);
+        hide();
       }
-    }, 240);
+    }, 200);
   }
 
-  input.addEventListener('input', (e) => {
-    scheduleQuery(input.value);
-  });
+  input.addEventListener("input", () => scheduleQuery(input.value));
+  input.addEventListener("focus", () => { if (!input.value.trim()) showRecent(); });
 
   // Keyboard navigation
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowDown') {
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") {
       e.preventDefault();
       setActive(Math.min(activeIndex + 1, suggestions.length - 1));
       return;
     }
-    if (e.key === 'ArrowUp') {
+    if (e.key === "ArrowUp") {
       e.preventDefault();
       setActive(Math.max(activeIndex - 1, 0));
       return;
     }
-    if (e.key === 'Enter') {
+    if (e.key === "Enter") {
       if (activeIndex >= 0 && suggestions[activeIndex]) {
         e.preventDefault();
         closeMobileMenu();
         navigate(suggestions[activeIndex].href);
-        clearSuggestions();
+        hide();
+        input.blur();
       } else if (input.value.trim()) {
         closeMobileMenu();
         navigate(`/search/${encodeURIComponent(input.value.trim())}`);
-        clearSuggestions();
+        hide();
+        input.blur();
       }
       return;
     }
-    if (e.key === 'Escape') {
-      clearSuggestions();
-      return;
+    if (e.key === "Escape") {
+      if (sugEl.style.display !== "none") { hide(); e.stopPropagation(); }
+      else input.blur();
     }
   });
 
-  // Click on suggestion
-  sugEl.addEventListener('click', (ev) => {
-    const item = ev.target.closest('.suggestion-item');
+  // Click on a suggestion / recent search / the Clear control
+  sugEl.addEventListener("click", (ev) => {
+    if (ev.target.closest("[data-clear]")) { clearRecentSearches(); hide(); return; }
+    const item = ev.target.closest(".suggestion-item");
     if (!item) return;
     const href = item.dataset.href;
     if (href) {
       closeMobileMenu();
       navigate(href);
-      clearSuggestions();
+      hide();
     }
   });
 
   // Mouseover to set active
-  sugEl.addEventListener('mousemove', (ev) => {
-    const item = ev.target.closest('.suggestion-item');
+  sugEl.addEventListener("mousemove", (ev) => {
+    const item = ev.target.closest(".suggestion-item");
     if (!item) return;
     const i = Number(item.dataset.index);
     if (!Number.isNaN(i)) setActive(i);
   });
 
   // Click outside to close
-  document.addEventListener('click', (ev) => {
-    if (!wrap.contains(ev.target)) clearSuggestions();
+  document.addEventListener("click", (ev) => {
+    if (!wrap.contains(ev.target)) hide();
   });
 }
 wireSearchInput(document.getElementById("searchInput"));
@@ -1363,37 +1500,49 @@ if (navProfileBtn) {
   updateNavProfileButton();
 }
 
-// ---------------- fullscreen mobile menu ----------------
-const navToggle = document.getElementById("navToggle");
+// ---------------- phone: tab bar + full-screen search sheet ----------------
+// The four places people actually go are always one thumb-tap away in the tab
+// bar; Search opens a full-screen sheet with the keyboard already up.
+const tabSearch = document.getElementById("tabSearch");
 const mobileMenu = document.getElementById("mobileMenu");
 const mobileMenuClose = document.getElementById("mobileMenuClose");
+const mobileSearchInput = document.getElementById("mobileSearchInput");
 
 function openMobileMenu() {
   mobileMenu.classList.add("open");
-  requestAnimationFrame(() => mobileMenu.classList.add("animate-in"));
-  navToggle.classList.add("is-open");
-  navToggle.setAttribute("aria-expanded", "true");
-  navToggle.setAttribute("aria-label", "Close menu");
+  tabSearch.setAttribute("aria-expanded", "true");
   document.body.classList.add("no-scroll");
-  mobileMenuClose.focus();
+  mobileSearchInput.focus();
 }
 function closeMobileMenu() {
   const wasOpen = mobileMenu.classList.contains("open");
-  mobileMenu.classList.remove("open", "animate-in");
-  navToggle.classList.remove("is-open");
-  navToggle.setAttribute("aria-expanded", "false");
-  navToggle.setAttribute("aria-label", "Open menu");
+  mobileMenu.classList.remove("open");
+  tabSearch.setAttribute("aria-expanded", "false");
   document.body.classList.remove("no-scroll");
   return wasOpen;
 }
-navToggle.addEventListener("click", () => {
+tabSearch.addEventListener("click", () => {
   mobileMenu.classList.contains("open") ? closeMobileMenu() : openMobileMenu();
 });
-mobileMenuClose.addEventListener("click", () => { closeMobileMenu(); navToggle.focus(); });
+mobileMenuClose.addEventListener("click", () => { closeMobileMenu(); tabSearch.focus(); });
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
-  if (closeMobileMenu()) navToggle.focus();
+  if (closeMobileMenu()) tabSearch.focus();
 });
+
+// "/" jumps to search from anywhere (unless you're already typing somewhere).
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+  const t = e.target;
+  if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+  if (document.querySelector(".vd-modal-backdrop")) return;
+  e.preventDefault();
+  if (window.matchMedia("(max-width: 719px)").matches) openMobileMenu();
+  else document.getElementById("searchInput").focus();
+});
+
+const footerYear = document.getElementById("footerYear");
+if (footerYear) footerYear.textContent = String(new Date().getFullYear());
 
 // This script runs at the end of <body> with no defer/async, so the DOM is
 // already ready here — calling route() once, directly, is correct.

@@ -2,7 +2,7 @@
  * VIDORA — LANGUAGE / PLAYER-SOURCE SWITCH
  * -----------------------------------------------------------
  * Two supported modes, picked from the navbar flag switch:
- *   "en" — Vidking embed player (js/player.js's original behavior)
+ *   "en" — Vidy embed player (js/player.js's original behavior)
  *   "ar" — URPlayer embed player (https://urplayer.net/#api)
  * The choice only changes WHICH embed provider gets used for playback;
  * it doesn't translate the rest of the UI. It's persisted in
@@ -74,7 +74,7 @@ const VidoraLang = (() => {
     if (next === current) return;
     set(next);
     if (window.VD && VD.toast) {
-      VD.toast(next === "ar" ? "Switched to the Arabic player (URPlayer)" : "Switched to the English player (Vidking)");
+      VD.toast(next === "ar" ? "Switched to the Arabic player (URPlayer)" : "Switched to the English player (Vidy)");
     }
     // Re-render whatever's currently on screen so any visible iframe picks
     // up the new provider immediately instead of waiting for the next
